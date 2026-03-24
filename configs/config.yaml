@@ -1,6 +1,6 @@
 data:
-  data_dir: "data/cafa-5-protein-function-prediction"
-  embeddings_dir: "data/embeddings"
+  data_dir: "./data/cafa-5-protein-function-prediction"
+  embeddings_dir: "./data/embeddings"
   embeddings_source: "ESM2"        # ESM2 | ProtBERT | T5
   num_labels: 500
   train_val_split: 0.9
@@ -23,3 +23,8 @@ training:
 
 output:
   output_dir: "outputs"
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  prediction_threshold: 0.5
