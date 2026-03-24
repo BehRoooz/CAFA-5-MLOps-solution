@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.config import Config
-from src.data.dataset import ProteinSequenceDataset
+from src.preprocess.dataset import ProteinSequenceDataset
 from src.models import build_model
 from src.utils import get_device
 

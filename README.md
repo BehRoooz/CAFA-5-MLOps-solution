@@ -77,10 +77,10 @@ Download data from the [Kaggle competition page](https://www.kaggle.com/competit
 - ProtBERT: [protbert-embeddings-for-cafa5](https://www.kaggle.com/datasets/henriupton/protbert-embeddings-for-cafa5)
 - T5Embeds: [t5embeds](https://www.kaggle.com/datasets/kriukov/t5embeds)
 
-Then organize under `preprocess/`:
+Then organize under `data/`:
 
 ```
-preprocess/
+data/
 ├── cafa-5-protein-function-prediction/
 │   └── Train/
 │       ├── train_terms.tsv

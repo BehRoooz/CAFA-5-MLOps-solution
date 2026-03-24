@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 from src.config import load_config
-from src.data.preprocessing import build_label_matrix, save_label_matrix
+from src.preprocess.preprocessing import build_label_matrix, save_label_matrix
 from src.utils import setup_logger
 
 
