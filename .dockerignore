@@ -1,0 +1,15 @@
+.git/
+.cafa5/
+__pycache__/
+*.pyc
+notebooks/
+*.npy
+preprocess/
+outputs/
+tests/
+.venv/
+.env
+*.egg-info/
+dist/
+build/
+.ruff_cache/

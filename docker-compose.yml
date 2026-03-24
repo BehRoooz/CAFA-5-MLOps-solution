@@ -1,0 +1,19 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./preprocess:/app/preprocess:ro
+      - ./outputs:/app/outputs:ro
+      - esm_cache:/root/.cache/torch/hub
+    environment:
+      - PROJECT_ROOT=/app
+      - CONFIG_PATH=configs/config.yaml
+    restart: unless-stopped
+
+volumes:
+  esm_cache:
+    driver: local
