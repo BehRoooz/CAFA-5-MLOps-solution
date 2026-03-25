@@ -24,6 +24,7 @@ class Config:
     model: dict[str, Any] = field(default_factory=dict)
     training: dict[str, Any] = field(default_factory=dict)
     output: dict[str, Any] = field(default_factory=dict)
+    embedding: dict[str, Any] = field(default_factory=dict)
 
     # Derived ---
     embedding_dim: int = field(init=False)
@@ -83,4 +84,5 @@ def load_config(path: str | Path) -> Config:
         model=raw.get("model", {}),
         training=raw.get("training", {}),
         output=raw.get("output", {}),
+        embedding=raw.get("embedding", {}),
     )

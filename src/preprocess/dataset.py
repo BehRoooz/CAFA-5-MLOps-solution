@@ -16,21 +16,24 @@ logger = logging.getLogger("cafa5")
 
 EMBED_FILE_MAP: dict[str, dict[str, str]] = {
     "esm2": {
-        "dir": "cafa-5-ems-2-embeddings-numpy",
+        # Written by scripts/embed_sequences.py
+        "dir": "hf_esm2",
         "train_embeds": "train_embeddings.npy",
         "train_ids": "train_ids.npy",
         "test_embeds": "test_embeddings.npy",
         "test_ids": "test_ids.npy",
     },
     "protbert": {
-        "dir": "protbert-embeddings-for-cafa5",
+        # Written by scripts/embed_sequences.py
+        "dir": "hf_protbert",
         "train_embeds": "train_embeddings.npy",
         "train_ids": "train_ids.npy",
         "test_embeds": "test_embeddings.npy",
         "test_ids": "test_ids.npy",
     },
     "t5": {
-        "dir": "t5embeds",
+        # Written by scripts/embed_sequences.py
+        "dir": "hf_prot_t5",
         "train_embeds": "train_embeds.npy",
         "train_ids": "train_ids.npy",
         "test_embeds": "test_embeds.npy",

@@ -15,8 +15,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import load_config
-from src.data.dataset import ProteinSequenceDataset
-from src.data.preprocessing import build_label_matrix, save_label_matrix
+from src.preprocess.dataset import ProteinSequenceDataset
+from src.preprocess.preprocessing import build_label_matrix, save_label_matrix
 from src.models import build_model
 from src.training.trainer import Trainer
 from src.utils import set_seed, setup_logger

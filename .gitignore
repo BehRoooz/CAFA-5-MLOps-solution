@@ -31,3 +31,6 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Paper / presentation notes (kept local, not synced)
+notes/
