@@ -20,6 +20,8 @@ EMBED_FILE_MAP: dict[str, dict[str, str]] = {
         "dir": "hf_esm2",
         "train_embeds": "train_embeddings.npy",
         "train_ids": "train_ids.npy",
+        "holdout_embeds": "holdout_embeddings.npy",
+        "holdout_ids": "holdout_ids.npy",
         "test_embeds": "test_embeddings.npy",
         "test_ids": "test_ids.npy",
     },
@@ -28,15 +30,19 @@ EMBED_FILE_MAP: dict[str, dict[str, str]] = {
         "dir": "hf_protbert",
         "train_embeds": "train_embeddings.npy",
         "train_ids": "train_ids.npy",
+        "holdout_embeds": "holdout_embeddings.npy",
+        "holdout_ids": "holdout_ids.npy",
         "test_embeds": "test_embeddings.npy",
         "test_ids": "test_ids.npy",
     },
     "t5": {
         # Written by scripts/embed_sequences.py
         "dir": "hf_prot_t5",
-        "train_embeds": "train_embeds.npy",
+        "train_embeds": "train_embeddings.npy",
         "train_ids": "train_ids.npy",
-        "test_embeds": "test_embeds.npy",
+        "holdout_embeds": "holdout_embeddings.npy",
+        "holdout_ids": "holdout_ids.npy",
+        "test_embeds": "test_embeddings.npy",
         "test_ids": "test_ids.npy",
     },
 }
@@ -61,8 +67,8 @@ class ProteinSequenceDataset(Dataset):
         label_matrix_dir: Union[str, Path, None] = None,
     ) -> None:
         super().__init__()
-        if datatype not in ("train", "test"):
-            raise ValueError(f"datatype must be 'train' or 'test', got '{datatype}'")
+        if datatype not in ("train", "test", "holdout"):
+            raise ValueError(f"datatype must be 'train' or 'test', or 'holdout', got '{datatype}'")
 
         self.datatype = datatype
         source = config.data.get("embeddings_source", "ESM2").lower()

@@ -15,6 +15,7 @@ from src.config import Config
 from src.preprocess.dataset import ProteinSequenceDataset
 from src.models import build_model
 from src.utils import get_device
+from src.config import Config
 
 logger = logging.getLogger("cafa5")
 
@@ -43,7 +44,11 @@ def predict(config: Config, model: torch.nn.Module) -> pd.DataFrame:
     Columns: ``Id``, ``GO term``, ``Confidence``.
     """
     device = get_device()
-    test_dataset = ProteinSequenceDataset(config, datatype="test")
+    datatype = config.prediction["datatype"]
+    if datatype not in ("test", "holdout"):
+        raise ValueError(f"datatype must be 'test' or 'holdout', got '{datatype}'")
+    logger.info("Running inference on %s set ...", datatype)    
+    test_dataset = ProteinSequenceDataset(config, datatype=datatype)
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
     label_matrix_dir = config.output_dir / f"label_matrix_top{config.num_labels}"

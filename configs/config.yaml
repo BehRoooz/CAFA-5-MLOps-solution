@@ -31,12 +31,14 @@ model:
   cnn_kernel_size: 3
 
 training:
-  epochs: 5
+  epochs: 20
   batch_size: 128
   learning_rate: 0.001
   scheduler_factor: 0.1
   scheduler_patience: 1
   seed: 42
 
+prediction:
+  datatype: "holdout" # test | holdout
 output:
   output_dir: "outputs"

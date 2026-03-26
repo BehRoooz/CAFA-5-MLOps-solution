@@ -89,7 +89,7 @@ Edit `configs/config.yaml` to adjust paths, model type, hyperparameters, and emb
 
 ## Usage
 
-### Preprocess labels
+### Preprocess labels 
 
 ```bash
 python scripts/preprocess.py --config configs/config.yaml
@@ -114,6 +114,13 @@ python scripts/embed_sequences.py --config configs/config.yaml \
 python scripts/embed_sequences.py --config configs/config.yaml \
   --ids-npy outputs/splits/holdout_ids.npy \
   --split holdout
+```
+
+## Generate embedding Test
+```bash
+python scripts/embed_sequences.py --config configs/config.yaml \
+  --ids-npy outputs/splits/test_ids.npy \
+  --split test
 ```
 
 ### (Optional) Evaluate holdout
@@ -156,7 +163,7 @@ embedding:
   backend: "esm2"                  # esm2 | prot_bert | prot_t5
   hf_cache_dir: "data/hf_cache"
   pooling: "mean"                  # mean | cls
-  max_length: 1024
+  max_length: 1280
   batch_size: 8
   fp16: true
   num_workers: 0
