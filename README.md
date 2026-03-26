@@ -183,6 +183,9 @@ training:
   scheduler_patience: 1
   seed: 42
 
+prediction:
+  datatype: "holdout"
+
 output:
   output_dir: "outputs"
 ```
