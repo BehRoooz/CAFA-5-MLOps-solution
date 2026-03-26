@@ -40,5 +40,6 @@ training:
 
 prediction:
   datatype: "holdout" # test | holdout
+  
 output:
   output_dir: "outputs"
