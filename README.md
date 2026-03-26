@@ -54,12 +54,14 @@ source .venv/bin/activate   # Linux/macOS
 pip install -r requirements.txt
 ```
 
-### 2. Place data
+Note: embedding generation can be memory-intensive (especially `prot_t5` / ProtT5-XL). Use a CUDA GPU and keep `embedding.fp16=true` for faster embedding on GPU.
 
-Download data from the [Kaggle competition page](https://www.kaggle.com/competitions/cafa-5-protein-function-prediction/data) and embedding datasets : 
-- EMS2 : [cafa-5-ems-2-embeddings-numpy](https://www.kaggle.com/datasets/viktorfairuschin/cafa-5-ems-2-embeddings-numpy)
-- ProtBERT: [protbert-embeddings-for-cafa5](https://www.kaggle.com/datasets/henriupton/protbert-embeddings-for-cafa5)
-- T5Embeds: [t5embeds](https://www.kaggle.com/datasets/kriukov/t5embeds)
+### 2. Place data
+Download CAFA-5 data from the [Kaggle competition page](https://www.kaggle.com/competitions/cafa-5-protein-function-prediction/data).
+
+You can either:
+- use precomputed embeddings (from Kaggle), or
+- generate embeddings directly from `Train/train_sequences.fasta` with `scripts/embed_sequences.py`.
 
 Then organize under `data/`:
 
@@ -70,11 +72,14 @@ data/
 │       ├── train_terms.tsv
 │       ├── train_sequences.fasta
 │       └── ...
-├── cafa-5-ems-2-embeddings-numpy/
-│   ├── train_embeddings.npy
-│   ├── train_ids.npy
-│   ├── test_embeddings.npy
-│   └── test_ids.npy
+├── embeddings/                           # configured by `data.embeddings_dir`
+│   ├── hf_esm2/
+│   │   ├── train_embeddings.npy
+│   │   ├── train_ids.npy
+│   │   ├── holdout_embeddings.npy
+│   │   └── holdout_ids.npy
+│   ├── hf_protbert/
+│   └── hf_prot_t5/
 └── ...
 ```
 
@@ -84,13 +89,44 @@ Edit `configs/config.yaml` to adjust paths, model type, hyperparameters, and emb
 
 ## Usage
 
-### Preprocess labels
+### Preprocess labels 
 
 ```bash
 python scripts/preprocess.py --config configs/config.yaml
 ```
 
 Generates a binary label matrix (`.npy`) under `outputs/`.
+
+### Split train/holdout
+```bash
+python scripts/split_train_holdout.py --config configs/config.yaml
+```
+
+### Generate embeddings (train split)
+```bash
+python scripts/embed_sequences.py --config configs/config.yaml \
+  --ids-npy outputs/splits/train_ids.npy \
+  --split train
+```
+
+### Generate embeddings (holdout split)
+```bash
+python scripts/embed_sequences.py --config configs/config.yaml \
+  --ids-npy outputs/splits/holdout_ids.npy \
+  --split holdout
+```
+
+## Generate embedding Test
+```bash
+python scripts/embed_sequences.py --config configs/config.yaml \
+  --ids-npy outputs/splits/test_ids.npy \
+  --split test
+```
+
+### (Optional) Evaluate holdout
+```bash
+python scripts/evaluate_holdout.py --config configs/config.yaml
+```
 
 ### Train
 
@@ -115,10 +151,23 @@ All parameters live in `configs/config.yaml`:
 ```yaml
 data:
   data_dir: "data/cafa-5-protein-function-prediction"
-  embeddings_dir: "data"
+  train_fasta: "data/cafa-5-protein-function-prediction/Train/train_sequences.fasta"
+  embeddings_dir: "data/embeddings"
   embeddings_source: "ESM2"        # ESM2 | ProtBERT | T5
   num_labels: 500
   train_val_split: 0.9
+  holdout_fraction: 0.1
+  splits_dir: "outputs/splits"
+
+embedding:
+  backend: "esm2"                  # esm2 | prot_bert | prot_t5
+  hf_cache_dir: "data/hf_cache"
+  pooling: "mean"                  # mean | cls
+  max_length: 1280
+  batch_size: 8
+  fp16: true
+  num_workers: 0
+  generated_subdir_prefix: "hf_"
 
 model:
   type: "mlp"                      # mlp | cnn1d

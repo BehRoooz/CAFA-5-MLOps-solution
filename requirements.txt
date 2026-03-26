@@ -5,3 +5,5 @@ tqdm>=4.65
 torchmetrics>=1.0
 pyyaml>=6.0
 matplotlib>=3.7
+transformers
+safetensors
