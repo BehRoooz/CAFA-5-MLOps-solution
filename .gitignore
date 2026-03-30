@@ -1,6 +1,7 @@
 # Data files
 data/
 outputs/
+!outputs/checkpoints/
 
 # Python
 __pycache__/
