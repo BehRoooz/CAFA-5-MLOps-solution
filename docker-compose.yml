@@ -1,0 +1,17 @@
+# Embedding API (FastAPI + background worker).
+# Run from repo root: docker compose up --build
+services:
+  embedding-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.embedding-api
+    image: cafa5-embedding-api:cpu
+    ports:
+      - "8000:8000"
+    volumes:
+      # Job SQLite DB + .npy artifacts (see services/embedding-api).
+      - ./outputs:/app/outputs
+      # Hugging Face cache (models/tokenizers) — avoids re-download on every restart.
+      - ./data/hf_cache:/app/data/hf_cache
+    environment:
+      - PYTHONUNBUFFERED=1
