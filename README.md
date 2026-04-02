@@ -29,13 +29,20 @@ CAFA-5-Protein-Function-Prediction-MLOps/
 ├── scripts/
 │   ├── train.py                   # CLI: python scripts/train.py --config configs/config.yaml
 │   ├── predict.py                 # CLI: python scripts/predict.py --config configs/config.yaml
-│   └── preprocess.py              # CLI: generate label matrix from raw data
+│   ├── preprocess.py            # CLI: generate label matrix from raw data
+│   ├── embed_sequences.py       # CLI: HF embedding generation
+│   └── smoke_embedding_api.sh   # Smoke test (curl + NumPy) for Embedding API
 ├── data/                          # .gitignored; user places data here
 ├── outputs/                       # .gitignored; checkpoints, logs, submissions
 ├── notebooks/
 │   └── CAFA5-EMS2embeds-Pytorch.ipynb   # Archived original notebook
+├── services/
+│   └── embedding-api/           # FastAPI embedding service
 ├── requirements.txt
 ├── pyproject.toml
+├── docker-compose.yml           # Embedding API (Docker Compose)
+├── Dockerfile.embedding         # CLI: batch embedding image
+├── Dockerfile.embedding-api     # Embedding API image
 ├── .gitignore
 └── README.md
 ```
@@ -196,6 +203,115 @@ output:
 - **CNN1D** (`cnn1d`): Two 1-D conv layers with tanh activations, max pooling, and fully-connected output.
 
 Both output raw logits (no final sigmoid) — `BCEWithLogitsLoss` handles the sigmoid internally for numerical stability.
+
+## How to run with Docker
+
+This section covers the **Embedding API** (FastAPI service under `services/embedding-api/`) and the **CLI embedding** image used for batch `.npy` generation.
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) and Docker Compose v2 (`docker compose`).
+- Your Linux user should be in the `docker` group (or use `sudo docker ...`) so the daemon socket is usable.
+- First API run will download the Hugging Face model into `./data/hf_cache` (mounted into the container).
+
+### Embedding API (Recommended)
+
+From the repository root:
+
+```bash
+docker compose up --build
+```
+
+The API listens on **http://127.0.0.1:8000**. Persisted on the host:
+
+- `./outputs` → job SQLite DB and per-job `.npy` artifacts (`outputs/service_artifacts/<job_id>/`)
+- `./data/hf_cache` → Hugging Face cache
+
+Service-specific details: [services/embedding-api/README.md](services/embedding-api/README.md).
+
+### Smoke test (curl + artifact download)
+
+With the stack running (`docker compose up`), in another terminal:
+
+```bash
+chmod +x scripts/smoke_embedding_api.sh
+./scripts/smoke_embedding_api.sh
+```
+
+Or manually:
+
+```bash
+# Health
+curl -sS http://127.0.0.1:8000/api/v1/health
+
+# Submit a tiny job (2 sequences, esm2)
+curl -sS -X POST http://127.0.0.1:8000/api/v1/jobs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stage": "test",
+    "backend": "esm2",
+    "pooling": "mean",
+    "batch_size": 2,
+    "max_length": 1280,
+    "sequences": [
+      {"id": "P1", "sequence": "MKTAYIAKQRQISFVKSHFSRQ"},
+      {"id": "P2", "sequence": "GAVLIPFYWSTCMNQDEKRH"}
+    ]
+  }'
+
+# Poll: replace <JOB_ID> with the returned id
+curl -sS http://127.0.0.1:8000/api/v1/jobs/<JOB_ID>
+
+# Download artifacts when status is "succeeded"
+curl -o test_ids.npy \
+  http://127.0.0.1:8000/api/v1/jobs/<JOB_ID>/artifacts/test_ids.npy
+curl -o test_embeddings.npy \
+  http://127.0.0.1:8000/api/v1/jobs/<JOB_ID>/artifacts/test_embeddings.npy
+```
+
+### API output files and shapes
+
+After a successful `test` job, the service writes (under the mounted `./outputs` tree):
+
+| File | Role | Typical shape / dtype |
+|------|------|------------------------|
+| `outputs/service_artifacts/jobs.db` | Job queue / status / artifact metadata | SQLite |
+| `outputs/service_artifacts/<job_id>/test_ids.npy` | Protein IDs in row order | `(N,)`, `object` |
+| `outputs/service_artifacts/<job_id>/test_embeddings.npy` | Embedding matrix | `(N, D)`, `float32` |
+
+For **`backend: esm2`**, `D = 1280`. For **`protbert`** or **`t5`**, `D = 1024`.
+
+Verify locally with Python:
+
+```python
+import numpy as np
+emb = np.load("test_embeddings.npy")
+ids = np.load("test_ids.npy", allow_pickle=True)
+assert emb.shape[0] == len(ids)
+print(emb.shape, emb.dtype)
+```
+
+### CLI embedding (batch, no HTTP)
+
+Build and run the CLI image (outputs follow `configs/config.yaml` paths under mounted `./data`):
+
+```bash
+docker build -f Dockerfile.embedding -t cafa5-embedding-cli:cpu .
+docker run --rm \
+  -v "$(pwd)/data:/app/data" \
+  -v "$(pwd)/outputs:/app/outputs" \
+  cafa5-embedding-cli:cpu \
+  --config configs/config.yaml \
+  --fasta examples/small_sequences.fasta \
+  --split test
+```
+
+### Future improvements
+
+- **GPU image**: base image with CUDA + GPU PyTorch; optional `deploy.resources` / `--gpus all` in Compose for faster embedding.
+- **Queue backend**: Redis/RQ, Celery, or cloud task queues for multi-worker embedding and back-pressure instead of a single in-process worker.
+- **Train / holdout stages**: extend the API to build label matrices, splits, and `train_*` / `holdout_*` embeddings as in the batch script.
+- **Registry / CI deployment**: push images to GHCR/ECR/GCR; GitHub Actions (build, scan, push); optional Kubernetes manifests or managed container services for production.
 
 ## License
 
