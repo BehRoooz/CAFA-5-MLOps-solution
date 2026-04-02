@@ -21,6 +21,18 @@ Current scope (Milestone 2, v1):
 - Python 3.10+
 - Dependencies: `fastapi`, `uvicorn`, `python-multipart`, `torch`, `transformers`, `numpy`
 
+## Run with Docker (Compose)
+
+From the **repository root**, use the project-wide Compose file and smoke test:
+
+```bash
+docker compose up --build
+# other terminal:
+chmod +x scripts/smoke_embedding_api.sh && ./scripts/smoke_embedding_api.sh
+```
+
+See also [../../README.md](../../README.md) → **How to run with Docker** for volumes, output shapes, and manual `curl` examples.
+
 ## Run the service (local CPU)
 
 From repo root (`CAFA-5-MLOps-solution/`):
