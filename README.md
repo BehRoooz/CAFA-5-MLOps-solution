@@ -41,8 +41,10 @@ CAFA-5-Protein-Function-Prediction-MLOps/
 ├── requirements.txt
 ├── pyproject.toml
 ├── docker-compose.yml           # Embedding API (Docker Compose)
-├── Dockerfile.embedding         # CLI: batch embedding image
-├── Dockerfile.embedding-api     # Embedding API image
+├── docker/
+│   └── docker_embedding/
+│       ├── Dockerfile.embedding-cli   # CLI: batch embedding image
+│       └── Dockerfile.embedding-api   # Embedding API image
 ├── .gitignore
 └── README.md
 ```
@@ -296,7 +298,7 @@ print(emb.shape, emb.dtype)
 Build and run the CLI image (outputs follow `configs/config.yaml` paths under mounted `./data`):
 
 ```bash
-docker build -f Dockerfile.embedding -t cafa5-embedding-cli:cpu .
+docker build -f docker/docker_embedding/Dockerfile.embedding-cli -t cafa5-embedding-cli:cpu .
 docker run --rm \
   -v "$(pwd)/data:/app/data" \
   -v "$(pwd)/outputs:/app/outputs" \

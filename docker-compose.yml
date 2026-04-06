@@ -4,7 +4,7 @@ services:
   embedding-api:
     build:
       context: .
-      dockerfile: Dockerfile.embedding-api
+      dockerfile: docker/docker_embedding/Dockerfile.embedding-api
     image: cafa5-embedding-api:cpu
     ports:
       - "8000:8000"
