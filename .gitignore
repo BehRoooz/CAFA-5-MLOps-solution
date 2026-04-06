@@ -1,5 +1,6 @@
 # Data files
 data/
+docs/
 outputs/
 !outputs/checkpoints/
 
