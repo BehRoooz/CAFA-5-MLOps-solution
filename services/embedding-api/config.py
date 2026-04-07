@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 API_PREFIX = "/api/v1"
 ARTIFACT_ROOT = Path("outputs/service_artifacts")
@@ -11,3 +12,4 @@ DEFAULT_BATCH_SIZE = 8
 DEFAULT_MAX_LENGTH = 1280
 
 WORKER_POLL_INTERVAL_SEC = 1.0
+GO_PREDICTION_API_URL = os.getenv("GO_PREDICTION_API_URL", "http://go-prediction-api:8000")

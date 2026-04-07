@@ -2,15 +2,27 @@ from __future__ import annotations
 
 import threading
 import uuid
+import json
+import time
 from pathlib import Path
 from typing import Literal
+from urllib import request as urlrequest
+from urllib.error import HTTPError, URLError
 
+import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from config import API_PREFIX, ARTIFACT_ROOT, DB_PATH
+from config import API_PREFIX, ARTIFACT_ROOT, DB_PATH, GO_PREDICTION_API_URL
 from job_store import JobStore
-from schemas import CreateJobRequest, CreateJobResponse, JobStatusResponse
+from schemas import (
+    CreateJobRequest,
+    CreateJobResponse,
+    JobStatusResponse,
+    PredictGoFromSequencesRequest,
+    PredictGoRequest,
+    PredictGoResponse,
+)
 from worker import worker_loop
 
 app = FastAPI(title="Embedding API", version="0.1.0")
@@ -116,3 +128,141 @@ def get_artifact(job_id: str, name: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="ARTIFACT_NOT_FOUND")
     return FileResponse(path=str(path), filename=name, media_type="application/octet-stream")
+
+
+def _post_go_predict(embedding: list[float], top_k: int) -> dict:
+    endpoint = f"{GO_PREDICTION_API_URL.rstrip('/')}/predict"
+    payload = json.dumps({"embedding": embedding, "top_k": top_k}).encode("utf-8")
+    req = urlrequest.Request(
+        endpoint,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=60) as resp:
+            body = resp.read().decode("utf-8")
+            return json.loads(body) if body else {}
+    except HTTPError as exc:
+        err_body = exc.read().decode("utf-8", errors="replace")
+        raise HTTPException(
+            status_code=502,
+            detail=f"GO_API_HTTP_{exc.code}: {err_body}",
+        ) from exc
+    except URLError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"GO_API_UNREACHABLE: {exc.reason}",
+        ) from exc
+
+
+def _predict_go_for_job(job_id: str, request: PredictGoRequest) -> PredictGoResponse:
+    job = store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="JOB_NOT_FOUND")
+    if job["status"] != "succeeded":
+        raise HTTPException(status_code=409, detail="JOB_NOT_READY")
+
+    artifacts = store.list_artifacts(job_id)
+    ids_entry = next((a for a in artifacts if a["name"] == "test_ids.npy"), None)
+    emb_entry = next((a for a in artifacts if a["name"] == "test_embeddings.npy"), None)
+    if ids_entry is None or emb_entry is None:
+        raise HTTPException(status_code=404, detail="EMBEDDING_ARTIFACTS_NOT_FOUND")
+
+    ids = np.load(ids_entry["path"], allow_pickle=True)
+    embeddings = np.load(emb_entry["path"])
+    if embeddings.ndim != 2:
+        raise HTTPException(status_code=500, detail="INVALID_EMBEDDINGS_SHAPE")
+    if len(ids) != embeddings.shape[0]:
+        raise HTTPException(status_code=500, detail="IDS_EMBEDDINGS_LENGTH_MISMATCH")
+    if embeddings.shape[1] != 1280:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "GO API expects 1280-dim embeddings. "
+                f"Received dimension {embeddings.shape[1]} from embedding job."
+            ),
+        )
+
+    if request.indices is None:
+        selected_indices = list(range(embeddings.shape[0]))
+    else:
+        if not request.indices:
+            raise HTTPException(status_code=400, detail="indices must not be empty")
+        selected_indices = request.indices
+        bad = [i for i in selected_indices if i < 0 or i >= embeddings.shape[0]]
+        if bad:
+            raise HTTPException(status_code=400, detail=f"indices out of range: {bad}")
+
+    results: list[dict] = []
+    failures: list[dict] = []
+    model_version: str | None = None
+    for idx in selected_indices:
+        try:
+            response = _post_go_predict(embeddings[idx].astype(float).tolist(), request.top_k)
+            if model_version is None:
+                model_version = response.get("model_version")
+            results.append(
+                {
+                    "index": idx,
+                    "sequence_id": str(ids[idx]),
+                    "predictions": response.get("predictions", []),
+                }
+            )
+        except HTTPException as exc:
+            failure = {"index": idx, "sequence_id": str(ids[idx]), "error": exc.detail}
+            if request.fail_fast:
+                raise HTTPException(status_code=502, detail=failure) from exc
+            failures.append(failure)
+
+    return PredictGoResponse(
+        job_id=job_id,
+        status="succeeded",
+        model_version=model_version,
+        top_k=request.top_k,
+        results=results,
+        failures=failures,
+    )
+
+
+@app.post(API_PREFIX + "/jobs/{job_id}/predict-go", response_model=PredictGoResponse)
+def predict_go_for_job(job_id: str, request: PredictGoRequest) -> PredictGoResponse:
+    return _predict_go_for_job(job_id, request)
+
+
+def _wait_for_job_completion(job_id: str, timeout_seconds: int, poll_interval_seconds: float) -> None:
+    deadline = time.time() + timeout_seconds
+    while True:
+        job = store.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="JOB_NOT_FOUND")
+        if job["status"] == "succeeded":
+            return
+        if job["status"] == "failed":
+            raise HTTPException(status_code=500, detail=job["error"] or "EMBEDDING_JOB_FAILED")
+        if time.time() > deadline:
+            raise HTTPException(status_code=504, detail="EMBEDDING_JOB_TIMEOUT")
+        time.sleep(poll_interval_seconds)
+
+
+@app.post(API_PREFIX + "/predict-go-from-sequences", response_model=PredictGoResponse)
+def predict_go_from_sequences(request: PredictGoFromSequencesRequest) -> PredictGoResponse:
+    job_id = str(uuid.uuid4())
+    job_payload = {
+        "stage": "test",
+        "backend": request.backend,
+        "pooling": request.pooling,
+        "batch_size": request.batch_size,
+        "max_length": request.max_length,
+        "sequences": [seq.model_dump() for seq in request.sequences],
+    }
+    store.create_job(job_id, job_payload)
+    _wait_for_job_completion(
+        job_id=job_id,
+        timeout_seconds=request.timeout_seconds,
+        poll_interval_seconds=request.poll_interval_seconds,
+    )
+    return _predict_go_for_job(
+        job_id=job_id,
+        request=PredictGoRequest(top_k=request.top_k, indices=request.indices, fail_fast=request.fail_fast),
+    )
