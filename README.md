@@ -41,8 +41,10 @@ CAFA-5-Protein-Function-Prediction-MLOps/
 ├── requirements.txt
 ├── pyproject.toml
 ├── docker-compose.yml           # Embedding API (Docker Compose)
-├── Dockerfile.embedding         # CLI: batch embedding image
-├── Dockerfile.embedding-api     # Embedding API image
+├── docker/
+│   └── docker_embedding/
+│       ├── Dockerfile.embedding-cli   # CLI: batch embedding image
+│       └── Dockerfile.embedding-api   # Embedding API image
 ├── .gitignore
 └── README.md
 ```
@@ -296,7 +298,7 @@ print(emb.shape, emb.dtype)
 Build and run the CLI image (outputs follow `configs/config.yaml` paths under mounted `./data`):
 
 ```bash
-docker build -f Dockerfile.embedding -t cafa5-embedding-cli:cpu .
+docker build -f docker/docker_embedding/Dockerfile.embedding-cli -t cafa5-embedding-cli:cpu .
 docker run --rm \
   -v "$(pwd)/data:/app/data" \
   -v "$(pwd)/outputs:/app/outputs" \
@@ -312,6 +314,248 @@ docker run --rm \
 - **Queue backend**: Redis/RQ, Celery, or cloud task queues for multi-worker embedding and back-pressure instead of a single in-process worker.
 - **Train / holdout stages**: extend the API to build label matrices, splits, and `train_*` / `holdout_*` embeddings as in the batch script.
 - **Registry / CI deployment**: push images to GHCR/ECR/GCR; GitHub Actions (build, scan, push); optional Kubernetes manifests or managed container services for production.
+
+## Integrated Embedding -> GO API
+
+To run both teammate services together (embedding + GO prediction + MLflow):
+
+```bash
+docker compose up --build
+```
+
+Ports:
+
+- `embedding-api`: `http://127.0.0.1:8000`
+- `go-prediction-api`: `http://127.0.0.1:8001`
+- `mlflow`: `http://127.0.0.1:5000`
+
+Integration flow:
+
+1. Submit embedding job (`POST /api/v1/jobs` or `/api/v1/jobs/fasta`) to `embedding-api`.
+2. Poll until status is `succeeded`.
+3. Trigger GO inference directly from embedding artifacts:
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8000/api/v1/jobs/<JOB_ID>/predict-go" \
+  -H "Content-Type: application/json" \
+  -d '{"top_k": 10}'
+```
+
+Optional request fields:
+
+- `indices`: subset of embedding row indices to score (e.g. `[0, 3, 7]`)
+- `fail_fast`: default `true`; set `false` to continue on per-sequence failures and collect them in `failures`.
+
+One-shot endpoint (submit + wait + predict in one call):
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8000/api/v1/predict-go-from-sequences" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "backend": "esm2",
+    "pooling": "mean",
+    "batch_size": 2,
+    "max_length": 1280,
+    "top_k": 10,
+    "sequences": [
+      {"id": "P1", "sequence": "MKTAYIAKQRQISFVKSHFSRQ"},
+      {"id": "P2", "sequence": "GAVLIPFYWSTCMNQDEKRH"}
+    ]
+  }'
+```
+
+### API Request Scenarios (examples)
+
+Assuming the integrated stack is running:
+
+```bash
+docker compose up --build
+```
+
+Service URLs:
+
+- Embedding API: `http://127.0.0.1:8000`
+- GO Prediction API: `http://127.0.0.1:8001`
+
+Quick health checks:
+
+```bash
+curl -sS http://127.0.0.1:8000/api/v1/health
+curl -sS http://127.0.0.1:8001/health
+```
+
+#### 1) Send amino acid sequences -> return embedding vectors
+
+Submit JSON sequences to `embedding-api`, poll job status, then download `.npy` artifacts.
+
+```bash
+# 1) Submit job
+RESP=$(curl -sS -X POST http://127.0.0.1:8000/api/v1/jobs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stage": "test",
+    "backend": "esm2",
+    "pooling": "mean",
+    "batch_size": 2,
+    "max_length": 1280,
+    "sequences": [
+      {"id": "P1", "sequence": "MKTAYIAKQRQISFVKSHFSRQ"},
+      {"id": "P2", "sequence": "GAVLIPFYWSTCMNQDEKRH"}
+    ]
+  }')
+
+echo "$RESP"
+
+# 2) Extract job_id
+JOB_ID=$(python - <<'PY'
+import json,sys
+print(json.loads(sys.stdin.read())["job_id"])
+PY
+<<< "$RESP")
+
+echo "JOB_ID=$JOB_ID"
+
+# 3) Poll until succeeded
+curl -sS "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID"
+
+# 4) Download embeddings + ids
+curl -sS -o test_ids.npy \
+  "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID/artifacts/test_ids.npy"
+curl -sS -o test_embeddings.npy \
+  "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID/artifacts/test_embeddings.npy"
+```
+
+Optional shape check:
+
+```bash
+python - <<'PY'
+import numpy as np
+ids = np.load("test_ids.npy", allow_pickle=True)
+emb = np.load("test_embeddings.npy")
+print("ids:", ids.shape, ids.dtype)
+print("emb:", emb.shape, emb.dtype)
+PY
+```
+
+#### 2) Send FASTA file -> return embedding vectors
+
+Upload FASTA to `embedding-api`.
+
+```bash
+# Example FASTA file
+cat > sample.fasta <<'EOF'
+>P1
+MKTAYIAKQRQISFVKSHFSRQ
+>P2
+GAVLIPFYWSTCMNQDEKRH
+EOF
+
+# 1) Submit FASTA job
+RESP=$(curl -sS -X POST http://127.0.0.1:8000/api/v1/jobs/fasta \
+  -F "fasta_file=@sample.fasta" \
+  -F "backend=esm2" \
+  -F "pooling=mean" \
+  -F "batch_size=2" \
+  -F "max_length=1280")
+
+echo "$RESP"
+
+# 2) Extract job_id
+JOB_ID=$(python - <<'PY'
+import json,sys
+print(json.loads(sys.stdin.read())["job_id"])
+PY
+<<< "$RESP")
+
+# 3) Poll + download artifacts
+curl -sS "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID"
+curl -sS -o test_ids.npy \
+  "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID/artifacts/test_ids.npy"
+curl -sS -o test_embeddings.npy \
+  "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID/artifacts/test_embeddings.npy"
+```
+
+#### 3) Send embedding vector -> return GO predictions
+
+Call `go-prediction-api` directly with one embedding vector (length must be `1280`).
+
+```bash
+python - <<'PY'
+import json
+import numpy as np
+import requests
+
+# Replace with your real embedding. This example loads first row from file:
+emb = np.load("test_embeddings.npy")[0].astype(float).tolist()
+
+payload = {"embedding": emb, "top_k": 10}
+r = requests.post("http://127.0.0.1:8001/predict", json=payload, timeout=60)
+print("status:", r.status_code)
+print(json.dumps(r.json(), indent=2))
+PY
+```
+
+#### 4) Send sequence list -> return GO predictions
+
+Use one-shot endpoint on `embedding-api`: embed + wait + GO predict in one call.
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8000/api/v1/predict-go-from-sequences" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "backend": "esm2",
+    "pooling": "mean",
+    "batch_size": 2,
+    "max_length": 1280,
+    "top_k": 10,
+    "sequences": [
+      {"id": "P1", "sequence": "MKTAYIAKQRQISFVKSHFSRQ"},
+      {"id": "P2", "sequence": "GAVLIPFYWSTCMNQDEKRH"}
+    ]
+  }'
+```
+
+Useful optional fields:
+
+- `indices`: predict only selected rows (e.g. `[0, 1]`)
+- `fail_fast`: default `true`; set `false` to continue and collect per-sequence failures
+- `timeout_seconds`, `poll_interval_seconds`: control waiting behavior
+
+#### 5) Send FASTA -> return GO predictions
+
+Current API supports this as a 2-step flow (FASTA job, then GO prediction from job artifacts).
+
+```bash
+# 1) Submit FASTA for embedding
+RESP=$(curl -sS -X POST http://127.0.0.1:8000/api/v1/jobs/fasta \
+  -F "fasta_file=@sample.fasta" \
+  -F "backend=esm2" \
+  -F "pooling=mean" \
+  -F "batch_size=2" \
+  -F "max_length=1280")
+
+JOB_ID=$(python - <<'PY'
+import json,sys
+print(json.loads(sys.stdin.read())["job_id"])
+PY
+<<< "$RESP")
+
+# 2) Poll until embedding job succeeds
+curl -sS "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID"
+
+# 3) Trigger GO prediction from embedding artifacts
+curl -sS -X POST "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID/predict-go" \
+  -H "Content-Type: application/json" \
+  -d '{"top_k": 10}'
+```
+
+Notes:
+
+- `go-prediction-api` expects embedding dimension `1280` (ESM2-compatible path).
+- For large FASTA payloads, use moderate `batch_size` to reduce memory pressure.
+- If a request fails, inspect logs:
+  - `docker compose logs -f embedding-api`
+  - `docker compose logs -f go-prediction-api`
 
 ## License
 

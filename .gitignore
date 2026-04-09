@@ -2,7 +2,7 @@
 data/
 docs/
 outputs/
-!outputs/checkpoints/
+outputs/checkpoints/
 
 # Python
 __pycache__/

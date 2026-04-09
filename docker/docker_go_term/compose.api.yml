@@ -1,9 +1,7 @@
-# Integrated stack: Embedding API + GO Prediction API + MLflow.
-# Run from repo root: docker compose up --build
 services:
   embedding-api:
     build:
-      context: .
+      context: ../..
       dockerfile: docker/docker_embedding/Dockerfile.embedding-api
     image: cafa5-embedding-api:local
     working_dir: /app/services/embedding-api
@@ -16,14 +14,14 @@ services:
       - go-prediction-api
       - mlflow
     volumes:
-      - ./outputs:/app/outputs
-      - ./data/hf_cache:/app/data/hf_cache
+      - ../../outputs:/app/outputs
+      - ../../data/hf_cache:/app/data/hf_cache
     ports:
       - "8000:8000"
 
   go-prediction-api:
     build:
-      context: .
+      context: ../..
       dockerfile: docker/docker_go_term/Dockerfile.api
     image: cafa5-go-prediction-api:local
     working_dir: /app/services/go-prediction-api
@@ -40,6 +38,6 @@ services:
     image: ghcr.io/mlflow/mlflow:v2.13.0
     command: mlflow server --host 0.0.0.0 --port 5000
     volumes:
-      - ./mlruns:/mlruns
+      - ../../mlruns:/mlruns
     ports:
       - "5000:5000"
