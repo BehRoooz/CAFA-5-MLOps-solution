@@ -13,3 +13,5 @@ fastapi-cli>=0.0.24
 fastapi-cloud-cli>=0.15.1
 uvicorn>=0.42.0
 python-multipart>=0.0.22
+
+mlflow==2.13.0
