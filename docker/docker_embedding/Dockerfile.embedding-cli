@@ -21,4 +21,4 @@ COPY README.md /app/README.md
 
 RUN mkdir -p /app/data /app/outputs
 
-ENTRYPOINT ["python", "scripts/embed_sequences.py"]
+ENTRYPOINT ["python", "scripts/embed_sequences.py", "--config", "configs/config.yaml"]
