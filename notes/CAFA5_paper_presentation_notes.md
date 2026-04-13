@@ -336,3 +336,13 @@ Last updated: 2026-03-26
 - “We solved this by making the serving layer tolerant to optional components and by deriving missing metadata from checkpoint provenance.”
 - “This milestone gave us a reproducible base for next milestone: full MLflow-enabled inference tracking and model registry loading.”
 
+## Recommended Architecture
+### Training plane (private)
+Services: mlflow, optional training-api, trainer job container, data volumes.
+Network exposure: internal only (no public ports except maybe MLflow behind VPN/auth).
+
+### Serving plane (public)
+Services: embedding-api, go-prediction-api, reverse proxy (nginx), optional read-only MLflow access.
+No training data mounted.
+
+**This is cleaner for future web deployment and least-privilege security.**
