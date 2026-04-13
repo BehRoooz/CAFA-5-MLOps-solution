@@ -1,6 +1,27 @@
 # Integrated stack: Embedding API + GO Prediction API + MLflow.
 # Run from repo root: docker compose up --build
 services:
+  trainer:
+    build:
+      context: .
+      dockerfile: docker/docker_training/Dockerfile.training
+    image: cafa5-trainer:local
+    working_dir: /app
+    profiles: ["training"]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONPATH: /app
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      REGISTERED_MODEL_NAME: cafa-go-model
+      PROMOTION_THRESHOLD: "0.35"
+    command: ["scripts/retrain_pipeline.py", "--config", "configs/config.yaml"]
+    depends_on:
+      - mlflow
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+      - ./mlruns:/mlruns
+
   embedding-api:
     build:
       context: .
@@ -31,10 +52,14 @@ services:
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /app:/app/services/go-prediction-api
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_URI: models:/cafa-go-model@champion
+      MODEL_CACHE_DIR: /app/model_cache
     depends_on:
       - mlflow
     ports:
       - "8001:8000"
+    volumes:
+      - ./outputs:/app/outputs
 
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.13.0
