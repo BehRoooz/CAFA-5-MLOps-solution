@@ -18,9 +18,7 @@ RUN pip install --upgrade pip setuptools wheel && \
 
 COPY src /app/src
 COPY services/go-prediction-api /app/services/go-prediction-api
-COPY outputs/checkpoints /app/outputs/checkpoints
-COPY outputs/label_matrix_top500 /app/outputs/label_matrix_top500
-COPY outputs/splits /app/outputs/splits
+RUN mkdir -p /app/model_cache /app/outputs
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "/app/services/go-prediction-api"]
