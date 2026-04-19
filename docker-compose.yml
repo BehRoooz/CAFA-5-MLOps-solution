@@ -1,26 +1,29 @@
 # Integrated stack: Embedding API + GO Prediction API + MLflow.
 # Run from repo root: docker compose up --build
 services:
-  trainer:
+  trainer-api:
     build:
       context: .
       dockerfile: docker/docker_training/Dockerfile.training
-    image: cafa5-trainer:local
+    image: cafa5-trainer-api:local
     working_dir: /app
     profiles: ["training"]
     environment:
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /app
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      # Host browser URL for run/registry links returned by GET /api/train/jobs/{id}
+      MLFLOW_EXTERNAL_UI_BASE: http://127.0.0.1:5000
       REGISTERED_MODEL_NAME: cafa-go-model
       PROMOTION_THRESHOLD: "0.35"
-    command: ["scripts/retrain_pipeline.py", "--config", "configs/config.yaml"]
     depends_on:
       - mlflow
     volumes:
       - ./data:/app/data
       - ./outputs:/app/outputs
       - ./mlruns:/mlruns
+    ports:
+      - "8002:8000"
 
   embedding-api:
     build:
@@ -63,7 +66,11 @@ services:
 
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.13.0
-    command: mlflow server --host 0.0.0.0 --port 5000
+    # Pin store + artifacts to the mounted volume (otherwise the server may use a different cwd ./mlruns).
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri file:///mlruns
+      --default-artifact-root file:///mlruns
     volumes:
       - ./mlruns:/mlruns
     ports:
