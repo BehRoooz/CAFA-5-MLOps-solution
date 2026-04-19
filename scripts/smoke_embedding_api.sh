@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Smoke test for the Embedding API (local or Docker on port 8000).
+# Smoke test for the Embedding API (direct uvicorn or via nginx gateway on port 80).
 # Usage:
 #   ./scripts/smoke_embedding_api.sh
-#   BASE_URL=http://127.0.0.1:8010 ./scripts/smoke_embedding_api.sh
+#   BASE_URL=http://127.0.0.1:8000 ./scripts/smoke_embedding_api.sh   # direct service port
+#   BASE_URL=http://127.0.0.1 ./scripts/smoke_embedding_api.sh       # docker compose (nginx)
 
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
+BASE_URL="${BASE_URL:-http://127.0.0.1}"
 
 echo "==> Health: GET ${BASE_URL}/api/v1/health"
 curl -sS "${BASE_URL}/api/v1/health"
