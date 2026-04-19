@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 from pathlib import Path
 from typing import Any
 
+import mlflow
+import mlflow.pytorch
 import numpy as np
 import torch
+from mlflow.tracking import MlflowClient
 
 from src.models.cnn1d import CNN1D
 from src.models.mlp import MultiLayerPerceptron
@@ -49,6 +54,63 @@ def build_model_from_meta(meta: dict[str, Any]) -> torch.nn.Module:
 
 def load_term_names(term_names_path: str | Path) -> np.ndarray:
     return np.load(Path(term_names_path), allow_pickle=True)
+
+
+def _parse_model_uri(model_uri: str) -> tuple[str, str]:
+    match = re.match(r"^models:/([^/@]+)(?:/([^/@]+)|@([^/@]+))$", model_uri)
+    if not match:
+        raise ValueError(f"Unsupported MODEL_URI format: {model_uri}")
+    name = match.group(1)
+    version_or_alias = match.group(2) or match.group(3)
+    return name, version_or_alias
+
+
+def _resolve_version(client: MlflowClient, model_name: str, version_or_alias: str) -> str:
+    if version_or_alias.isdigit():
+        return version_or_alias
+    mv = client.get_model_version_by_alias(model_name, version_or_alias)
+    return str(mv.version)
+
+
+def load_model_from_registry(
+    model_uri: str,
+    *,
+    device: str = "cpu",
+    cache_dir: str | Path = "/tmp/mlflow-cache",
+) -> tuple[torch.nn.Module, np.ndarray, dict[str, Any]]:
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if tracking_uri:
+        mlflow.set_tracking_uri(tracking_uri)
+
+    client = MlflowClient()
+    model_name, version_or_alias = _parse_model_uri(model_uri)
+    version = _resolve_version(client, model_name, version_or_alias)
+    mv = client.get_model_version(model_name, version)
+    model_source = mv.source  # runs:/<run_id>/model
+
+    model = mlflow.pytorch.load_model(model_uri=model_uri, dst_path=str(cache_dir))
+    model.to(device)
+    model.eval()
+
+    run_id = str(mv.run_id)
+    term_names_uri = f"runs:/{run_id}/label_artifacts/term_names.npy"
+    model_meta_uri = f"runs:/{run_id}/model_meta/model_meta.json"
+
+    term_names_path = mlflow.artifacts.download_artifacts(
+        artifact_uri=term_names_uri,
+        dst_path=str(cache_dir),
+    )
+    model_meta_path = mlflow.artifacts.download_artifacts(
+        artifact_uri=model_meta_uri,
+        dst_path=str(cache_dir),
+    )
+
+    term_names = np.load(term_names_path, allow_pickle=True)
+    meta = load_model_meta(model_meta_path)
+    meta["model_version"] = str(version)
+    meta["model_source"] = model_source
+    meta["run_id"] = run_id
+    return model, term_names, meta
 
 
 def load_model(

@@ -1,0 +1,29 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /app/requirements.txt
+RUN pip install --upgrade pip && pip install -r /app/requirements.txt
+
+COPY src /app/src
+COPY scripts /app/scripts
+COPY configs /app/configs
+COPY data/cafa-5-protein-function-prediction/Train/train_terms.tsv /app/data/cafa-5-protein-function-prediction/Train/train_terms.tsv
+
+# Copy the Training API service.
+COPY services/training-api /app/services/training-api
+
+# Runtime directories (mounted in docker run / compose).
+RUN mkdir -p /app/data /app/outputs
+
+EXPOSE 8000
+
+# Same pattern as docker_embedding/Dockerfile.embedding-api: invoke uvicorn directly (no python ENTRYPOINT).
+CMD ["uvicorn", "main:app", "--app-dir", "services/training-api", "--host", "0.0.0.0", "--port", "8000"]

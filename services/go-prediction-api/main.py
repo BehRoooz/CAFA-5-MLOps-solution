@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 
 from mlflow_logger import log_inference
-from model_loader import load_model, load_term_names
+from model_loader import load_model, load_model_from_registry, load_term_names
 from predictor_service import predict_top_k
 from schemas import HealthResponse, PredictRequest, PredictResponse
 
 APP_ROOT = Path(__file__).resolve().parents[2]
 
 CHECKPOINT_PATH = APP_ROOT / "outputs" / "checkpoints" / "best_model.pt"
+MODEL_URI = os.getenv("MODEL_URI", "models:/cafa-go-model@champion")
+MODEL_CACHE_DIR = os.getenv("MODEL_CACHE_DIR", "/tmp/mlflow-cache")
 TERM_NAMES_PATH = APP_ROOT / "outputs" / "label_matrix_top500" / "term_names.npy"
 META_PATH = APP_ROOT / "outputs" / "splits" / "model_meta.json"
 
@@ -27,8 +30,15 @@ MODEL_META = None
 def startup_event() -> None:
     global MODEL, TERM_NAMES, MODEL_META
     try:
-        MODEL, MODEL_META = load_model(CHECKPOINT_PATH, META_PATH, device="cpu")
-        TERM_NAMES = load_term_names(TERM_NAMES_PATH)
+        if MODEL_URI:
+            MODEL, TERM_NAMES, MODEL_META = load_model_from_registry(
+                MODEL_URI,
+                device="cpu",
+                cache_dir=MODEL_CACHE_DIR,
+            )
+        else:
+            MODEL, MODEL_META = load_model(CHECKPOINT_PATH, META_PATH, device="cpu")
+            TERM_NAMES = load_term_names(TERM_NAMES_PATH)
     except Exception:
         MODEL = None
         TERM_NAMES = None
@@ -59,6 +69,7 @@ def predict(request: PredictRequest, raw_request: Request) -> PredictResponse:
             top_k=request.top_k,
             apply_sigmoid=True,
             device="cpu",
+            expected_dim=int(MODEL_META.get("embedding_dim", 1280)),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

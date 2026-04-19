@@ -20,6 +20,7 @@ dependencies = [
     "matplotlib>=3.7",
     "transformers",
     "safetensors",
+    "mlflow==2.13.0",
 ]
 
 [project.optional-dependencies]
@@ -35,3 +36,4 @@ include = ["src*"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+

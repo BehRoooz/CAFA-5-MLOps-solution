@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class PredictRequest(BaseModel):
-    embedding: List[float] = Field(..., description="Embedding vector of length 1280")
+    embedding: List[float] = Field(..., description="Embedding vector matching deployed model dimension")
     top_k: int = Field(default=10, ge=1, description="Number of top predictions to return")
 
 
