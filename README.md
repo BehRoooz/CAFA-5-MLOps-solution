@@ -1,253 +1,227 @@
-# CAFA-5 Protein Function Prediction
+# CAFA-5 MLOps Solution
 
-Production-ready ML pipeline for the [Kaggle CAFA-5 Protein Function Prediction competition](https://www.kaggle.com/competitions/cafa-5-protein-function-prediction), predicting Gene Ontology (GO) terms from protein language model embeddings (ESM-2, ProtBERT, T5).
+Production-grade pipeline for CAFA-5 protein function prediction with:
+
+- CLI workflow for preprocessing, embedding, training, evaluation, and submission.
+- FastAPI microservices for embedding, GO prediction, and training orchestration.
+- MLflow tracking + model registry promotion flow.
+- NGINX gateway with TLS, basic auth, request limits, and routed access tiers.
+
+## Architecture At A Glance
+
+- `embedding-api` builds embeddings asynchronously from JSON sequences or FASTA uploads.
+- `go-prediction-api` serves GO term inference from 1280-dim embeddings (ESM2 path).
+- `trainer-api` queues and runs `train` or full `retrain` pipelines.
+- `mlflow` stores runs, metrics, artifacts, and registry aliases (`champion`).
+- `nginx` is the public entrypoint (`:80/:443`) and proxies all service routes.
 
 ## Project Structure
 
-```
-CAFA-5-Protein-Function-Prediction-MLOps/
+```text
+CAFA-5-MLOps-solution/
 ├── configs/
-│   └── config.yaml                # All hyperparams, paths, model selection
-├── src/
-│   ├── __init__.py
-│   ├── config.py                  # YAML config loading + dataclass validation
-│   ├── data/
-│   │   ├── __init__.py
-│   │   ├── dataset.py             # ProteinSequenceDataset (PyTorch Dataset)
-│   │   └── preprocessing.py       # Build binary label matrix from train_terms.tsv
-│   ├── models/
-│   │   ├── __init__.py            # Factory function build_model()
-│   │   ├── mlp.py                 # MultiLayerPerceptron
-│   │   └── cnn1d.py               # CNN1D
-│   ├── training/
-│   │   ├── __init__.py
-│   │   └── trainer.py             # Training loop, validation, checkpointing
-│   ├── inference/
-│   │   ├── __init__.py
-│   │   └── predictor.py           # Load model + generate submission
-│   └── utils.py                   # Seed setting, logging setup, device selection
+│   └── config.yaml                       # Central config for data/model/train/predict/embed
+├── data/                                 # Input data, embeddings, HF cache (mounted in containers)
+├── docker/
+│   ├── docker_embedding/
+│   │   ├── Dockerfile.embedding-api      # Embedding API image
+│   │   └── Dockerfile.embedding-cli      # Batch embedding CLI image
+│   ├── docker_go_term/
+│   │   ├── Dockerfile.api                # GO prediction API image
+│   │   └── docker-compose.yml            # Local compose for go-term service dev
+│   └── docker_training/
+│       └── Dockerfile.training           # Training API image
+├── examples/
+│   └── small_sequences.fasta             # Tiny FASTA for quick tests
+├── nginx/
+│   ├── nginx.conf                        # TLS gateway, auth, rate limits, routing
+│   ├── .htpasswd-admin                   # Admin credentials
+│   ├── .htpasswd-user                    # User credentials
+│   └── certs/                            # TLS cert/key mounted into nginx
+├── outputs/                              # Labels, splits, checkpoints, submissions, service artifacts
 ├── scripts/
-│   ├── train.py                   # CLI: python scripts/train.py --config configs/config.yaml
-│   ├── predict.py                 # CLI: python scripts/predict.py --config configs/config.yaml
-│   ├── preprocess.py            # CLI: generate label matrix from raw data
-│   ├── embed_sequences.py       # CLI: HF embedding generation
-│   └── smoke_embedding_api.sh   # Smoke test (curl + NumPy) for Embedding API
-├── data/                          # .gitignored; user places data here
-├── outputs/                       # .gitignored; checkpoints, logs, submissions
-├── notebooks/
-│   └── CAFA5-EMS2embeds-Pytorch.ipynb   # Archived original notebook
+│   ├── preprocess.py
+│   ├── split_train_holdout.py
+│   ├── embed_sequences.py
+│   ├── train.py
+│   ├── evaluate_holdout.py
+│   ├── promote_model.py
+│   ├── retrain_pipeline.py
+│   ├── predict.py
+│   └── smoke_embedding_api.sh
 ├── services/
-│   └── embedding-api/           # FastAPI embedding service
+│   ├── embedding-api/
+│   ├── go-prediction-api/
+│   └── training-api/
+├── src/                                  # Core model/data/training/inference modules
+├── docker-compose.yml                    # Integrated stack orchestration
 ├── requirements.txt
 ├── pyproject.toml
-├── docker-compose.yml           # Embedding API (Docker Compose)
-├── docker/
-│   └── docker_embedding/
-│       ├── Dockerfile.embedding-cli   # CLI: batch embedding image
-│       └── Dockerfile.embedding-api   # Embedding API image
-├── .gitignore
 └── README.md
 ```
 
-## Background
+## What Each Script Does
 
-The Gene Ontology (GO) is a concept hierarchy describing biological function of genes and gene products at different levels of abstraction. This project frames GO term prediction as a **multi-label classification** problem: given a protein embedding, predict which of the top-N GO terms apply.
+- `scripts/preprocess.py`: builds label matrix and GO term index from `train_terms.tsv`.
+- `scripts/split_train_holdout.py`: deterministic train/holdout ID split.
+- `scripts/embed_sequences.py`: generates embeddings from FASTA or raw sequence.
+- `scripts/train.py`: trains model, logs to MLflow, registers model.
+- `scripts/evaluate_holdout.py`: computes holdout BCE/F1 and logs evaluation run.
+- `scripts/promote_model.py`: promotes model version to alias (default `champion`) if metric threshold passes.
+- `scripts/retrain_pipeline.py`: train -> evaluate -> promote in one command.
+- `scripts/predict.py`: writes CAFA-format submission TSV.
+- `scripts/smoke_embedding_api.sh`: end-to-end embedding API sanity check.
 
-## Setup
+## Data Layout Expectations
 
-### 1. Create environment
+Download CAFA-5 input data from [Kaggle CAFA-5](https://www.kaggle.com/competitions/cafa-5-protein-function-prediction/data), then organize:
 
-```bash
-python -m venv .venv
-source .venv/bin/activate   # Linux/macOS
-pip install -r requirements.txt
-```
-
-Note: embedding generation can be memory-intensive (especially `prot_t5` / ProtT5-XL). Use a CUDA GPU and keep `embedding.fp16=true` for faster embedding on GPU.
-
-### 2. Place data
-Download CAFA-5 data from the [Kaggle competition page](https://www.kaggle.com/competitions/cafa-5-protein-function-prediction/data).
-
-You can either:
-- use precomputed embeddings (from Kaggle), or
-- generate embeddings directly from `Train/train_sequences.fasta` with `scripts/embed_sequences.py`.
-
-Then organize under `data/`:
-
-```
+```text
 data/
 ├── cafa-5-protein-function-prediction/
 │   └── Train/
-│       ├── train_terms.tsv
 │       ├── train_sequences.fasta
-│       └── ...
-├── embeddings/                           # configured by `data.embeddings_dir`
+│       └── train_terms.tsv
+├── embeddings/
 │   ├── hf_esm2/
-│   │   ├── train_embeddings.npy
-│   │   ├── train_ids.npy
-│   │   ├── holdout_embeddings.npy
-│   │   └── holdout_ids.npy
 │   ├── hf_protbert/
 │   └── hf_prot_t5/
-└── ...
+└── hf_cache/
 ```
 
-### 3. Configure
+## Local Python Setup (CLI workflow)
 
-Edit `configs/config.yaml` to adjust paths, model type, hyperparameters, and embedding source.
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-## Usage
+## Core Configuration
 
-### Preprocess labels 
+Edit `configs/config.yaml` before running. Most important fields:
+
+- `data.embeddings_source`: `ESM2 | ProtBERT | T5` (drives expected embedding dimension).
+- `embedding.backend`: `esm2 | prot_bert | prot_t5` (encoder used for generation).
+- `data.holdout_fraction`: split proportion for holdout evaluation.
+- `model.type`: `mlp` or `cnn1d`.
+- `training.*`: epochs, LR, scheduler, seed.
+- `prediction.datatype`: `test` or `holdout`.
+
+Important consistency rule: keep `data.embeddings_source` and `embedding.backend` aligned to avoid training/prediction on mismatched embedding spaces.
+
+## End-To-End CLI Pipeline
+
+### 1) Build labels and split IDs
 
 ```bash
 python scripts/preprocess.py --config configs/config.yaml
-```
-
-Generates a binary label matrix (`.npy`) under `outputs/`.
-
-### Split train/holdout
-```bash
 python scripts/split_train_holdout.py --config configs/config.yaml
 ```
 
-### Generate embeddings (train split)
+### 2) Generate embeddings for train and holdout
+
 ```bash
 python scripts/embed_sequences.py --config configs/config.yaml \
   --ids-npy outputs/splits/train_ids.npy \
   --split train
-```
 
-### Generate embeddings (holdout split)
-```bash
 python scripts/embed_sequences.py --config configs/config.yaml \
   --ids-npy outputs/splits/holdout_ids.npy \
   --split holdout
 ```
 
-## Generate embedding Test
-```bash
-python scripts/embed_sequences.py --config configs/config.yaml \
-  --ids-npy outputs/splits/test_ids.npy \
-  --split test
-```
-
-### (Optional) Evaluate holdout
-```bash
-python scripts/evaluate_holdout.py --config configs/config.yaml
-```
-
-### Train
+### 3) Train and evaluate
 
 ```bash
 python scripts/train.py --config configs/config.yaml
+python scripts/evaluate_holdout.py --config configs/config.yaml
 ```
 
-Trains the model, saves the best checkpoint (by val F1) to `outputs/checkpoints/best_model.pt`, and writes `outputs/training_history.json`.
-
-### Predict
+### 4) Retrain + promote in one step
 
 ```bash
-python scripts/predict.py --config configs/config.yaml [--checkpoint path/to/model.pt]
+python scripts/retrain_pipeline.py --config configs/config.yaml \
+  --promotion-threshold 0.35 \
+  --model-name cafa-go-model
 ```
 
-Produces `outputs/submission.tsv` in CAFA-5 format (Id, GO term, Confidence).
+### 5) Generate CAFA submission
 
-## Configuration
-
-All parameters live in `configs/config.yaml`:
-
-```yaml
-data:
-  data_dir: "data/cafa-5-protein-function-prediction"
-  train_fasta: "data/cafa-5-protein-function-prediction/Train/train_sequences.fasta"
-  embeddings_dir: "data/embeddings"
-  embeddings_source: "ESM2"        # ESM2 | ProtBERT | T5
-  num_labels: 500
-  train_val_split: 0.9
-  holdout_fraction: 0.1
-  splits_dir: "outputs/splits"
-
-embedding:
-  backend: "esm2"                  # esm2 | prot_bert | prot_t5
-  hf_cache_dir: "data/hf_cache"
-  pooling: "mean"                  # mean | cls
-  max_length: 1280
-  batch_size: 8
-  fp16: true
-  num_workers: 0
-  generated_subdir_prefix: "hf_"
-
-model:
-  type: "mlp"                      # mlp | cnn1d
-  mlp_hidden_dims: [864, 712]
-  cnn_out_channels: [3, 8]
-  cnn_kernel_size: 3
-
-training:
-  epochs: 5
-  batch_size: 128
-  learning_rate: 0.001
-  scheduler_factor: 0.1
-  scheduler_patience: 1
-  seed: 42
-
-prediction:
-  datatype: "holdout"
-
-output:
-  output_dir: "outputs"
+```bash
+python scripts/predict.py --config configs/config.yaml
 ```
 
-## Models
+Output: `outputs/submission.tsv`.
 
-- **MLP** (`mlp`): Configurable hidden-layer sizes, ReLU activations.
-- **CNN1D** (`cnn1d`): Two 1-D conv layers with tanh activations, max pooling, and fully-connected output.
+## Docker Services And Compose
 
-Both output raw logits (no final sigmoid) — `BCEWithLogitsLoss` handles the sigmoid internally for numerical stability.
+Main compose file: `docker-compose.yml`.
 
-## How to run with Docker
-
-This section covers the **Embedding API** (FastAPI service under `services/embedding-api/`) and the **CLI embedding** image used for batch `.npy` generation.
-
-### Prerequisites
-
-- [Docker](https://docs.docker.com/get-docker/) and Docker Compose v2 (`docker compose`).
-- Your Linux user should be in the `docker` group (or use `sudo docker ...`) so the daemon socket is usable.
-- First API run will download the Hugging Face model into `./data/hf_cache` (mounted into the container).
-
-### Embedding API (Recommended)
-
-From the repository root:
+### Default stack (gateway + embedding + GO prediction + MLflow)
 
 ```bash
 docker compose up --build
 ```
 
-The API listens on **http://127.0.0.1:8000**. Persisted on the host:
+Public entrypoint is NGINX:
 
-- `./outputs` → job SQLite DB and per-job `.npy` artifacts (`outputs/service_artifacts/<job_id>/`)
-- `./data/hf_cache` → Hugging Face cache
+- `http://127.0.0.1` redirects to TLS.
+- `https://127.0.0.1` serves routed APIs.
 
-Service-specific details: [services/embedding-api/README.md](services/embedding-api/README.md).
+### Include training API profile
 
-### Smoke test (curl + artifact download)
-
-With the stack running (`docker compose up`), in another terminal:
+`trainer-api` is under Compose profile `training`:
 
 ```bash
-chmod +x scripts/smoke_embedding_api.sh
-./scripts/smoke_embedding_api.sh
+docker compose --profile training up --build
 ```
 
-Or manually:
+Use this command when you need `/api/train/...` endpoints through NGINX.
+
+## NGINX Gateway Routes
+
+All routes are HTTPS on `https://127.0.0.1`:
+
+- `/api/v1/*` -> `embedding-api` (admin basic auth).
+- `/api/predict/*` -> `go-prediction-api` (user basic auth).
+- `/api/train*` -> `trainer-api` (admin basic auth, requires `training` profile).
+- `/mlflow/*` -> MLflow UI (admin basic auth).
+
+Gateway also applies:
+
+- per-path request body limits,
+- request-rate limiting,
+- upstream timeouts suitable for long jobs,
+- forwarded trace headers for observability.
+
+## Interactive Monitoring
+
+- MLflow UI (interactive run comparison, metrics, artifacts, model registry):
+  - `https://127.0.0.1/mlflow/`
+- Async API workflows:
+  - submit jobs, poll status, download artifacts.
+- Compose/service logs:
+  - `docker compose logs -f nginx embedding-api go-prediction-api mlflow`
+  - add `trainer-api` when using training profile.
+
+## Practical API Examples
+
+Use your basic-auth credentials depending on route (`.htpasswd-admin` or `.htpasswd-user`).
+
+### 1) Health checks via gateway
 
 ```bash
-# Health
-curl -sS http://127.0.0.1:8000/api/v1/health
+curl -sk -u USER:PASS https://127.0.0.1/api/v1/health
+curl -sk -u USER:PASS https://127.0.0.1/api/predict/health
+curl -sk -u USER:PASS https://127.0.0.1/api/train/health
+```
 
-# Submit a tiny job (2 sequences, esm2)
-curl -sS -X POST http://127.0.0.1:8000/api/v1/jobs \
+### 2) Sequences -> embeddings (`embedding-api`)
+
+```bash
+curl -sk -u ADMIN:ADMIN_PASS -X POST https://127.0.0.1/api/v1/jobs \
   -H "Content-Type: application/json" \
   -d '{
     "stage": "test",
@@ -260,42 +234,85 @@ curl -sS -X POST http://127.0.0.1:8000/api/v1/jobs \
       {"id": "P2", "sequence": "GAVLIPFYWSTCMNQDEKRH"}
     ]
   }'
-
-# Poll: replace <JOB_ID> with the returned id
-curl -sS http://127.0.0.1:8000/api/v1/jobs/<JOB_ID>
-
-# Download artifacts when status is "succeeded"
-curl -o test_ids.npy \
-  http://127.0.0.1:8000/api/v1/jobs/<JOB_ID>/artifacts/test_ids.npy
-curl -o test_embeddings.npy \
-  http://127.0.0.1:8000/api/v1/jobs/<JOB_ID>/artifacts/test_embeddings.npy
 ```
 
-### API output files and shapes
+Poll:
 
-After a successful `test` job, the service writes (under the mounted `./outputs` tree):
+```bash
+curl -sk -u ADMIN:ADMIN_PASS https://127.0.0.1/api/v1/jobs/<JOB_ID>
+```
 
-| File | Role | Typical shape / dtype |
-|------|------|------------------------|
-| `outputs/service_artifacts/jobs.db` | Job queue / status / artifact metadata | SQLite |
-| `outputs/service_artifacts/<job_id>/test_ids.npy` | Protein IDs in row order | `(N,)`, `object` |
-| `outputs/service_artifacts/<job_id>/test_embeddings.npy` | Embedding matrix | `(N, D)`, `float32` |
+Download artifacts:
 
-For **`backend: esm2`**, `D = 1280`. For **`protbert`** or **`t5`**, `D = 1024`.
+```bash
+curl -sk -u ADMIN:ADMIN_PASS -o test_ids.npy \
+  https://127.0.0.1/api/v1/jobs/<JOB_ID>/artifacts/test_ids.npy
+curl -sk -u ADMIN:ADMIN_PASS -o test_embeddings.npy \
+  https://127.0.0.1/api/v1/jobs/<JOB_ID>/artifacts/test_embeddings.npy
+```
 
-Verify locally with Python:
+### 3) Embeddings -> GO terms (`go-prediction-api`)
 
-```python
+```bash
+python - <<'PY'
+import json
 import numpy as np
-emb = np.load("test_embeddings.npy")
-ids = np.load("test_ids.npy", allow_pickle=True)
-assert emb.shape[0] == len(ids)
-print(emb.shape, emb.dtype)
+import requests
+
+emb = np.load("test_embeddings.npy")[0].astype(float).tolist()
+resp = requests.post(
+    "https://127.0.0.1/api/predict/predict",
+    auth=("USER", "USER_PASS"),
+    json={"embedding": emb, "top_k": 10},
+    verify=False,
+    timeout=60,
+)
+print(resp.status_code)
+print(json.dumps(resp.json(), indent=2))
+PY
 ```
 
-### CLI embedding (batch, no HTTP)
+### 4) Sequences -> GO terms in one call
 
-Build and run the CLI image (outputs follow `configs/config.yaml` paths under mounted `./data`):
+```bash
+curl -sk -u USER:USER_PASS -X POST \
+  https://127.0.0.1/api/v1/predict-go-from-sequences \
+  -H "Content-Type: application/json" \
+  -d '{
+    "backend": "esm2",
+    "pooling": "mean",
+    "batch_size": 2,
+    "max_length": 1280,
+    "top_k": 10,
+    "sequences": [
+      {"id": "P1", "sequence": "MKTAYIAKQRQISFVKSHFSRQ"},
+      {"id": "P2", "sequence": "GAVLIPFYWSTCMNQDEKRH"}
+    ]
+  }'
+```
+
+### 5) Trigger training job through API
+
+```bash
+curl -sk -u ADMIN:ADMIN_PASS -X POST https://127.0.0.1/api/train/train \
+  -H "Content-Type: application/json" \
+  -d '{"config":"configs/config.yaml","mode":"retrain"}'
+```
+
+Poll:
+
+```bash
+curl -sk -u ADMIN:ADMIN_PASS https://127.0.0.1/api/train/jobs/<JOB_ID>
+```
+
+## Standalone Docker Images
+
+- `docker/docker_embedding/Dockerfile.embedding-api`
+- `docker/docker_embedding/Dockerfile.embedding-cli`
+- `docker/docker_go_term/Dockerfile.api`
+- `docker/docker_training/Dockerfile.training`
+
+Example CLI image run:
 
 ```bash
 docker build -f docker/docker_embedding/Dockerfile.embedding-cli -t cafa5-embedding-cli:cpu .
@@ -308,254 +325,18 @@ docker run --rm \
   --split test
 ```
 
-### Future improvements
+## Reproducibility And QC Notes
 
-- **GPU image**: base image with CUDA + GPU PyTorch; optional `deploy.resources` / `--gpus all` in Compose for faster embedding.
-- **Queue backend**: Redis/RQ, Celery, or cloud task queues for multi-worker embedding and back-pressure instead of a single in-process worker.
-- **Train / holdout stages**: extend the API to build label matrices, splits, and `train_*` / `holdout_*` embeddings as in the batch script.
-- **Registry / CI deployment**: push images to GHCR/ECR/GCR; GitHub Actions (build, scan, push); optional Kubernetes manifests or managed container services for production.
+- Fix seeds via `training.seed` for deterministic split/train behavior.
+- Keep embedding backend and training metadata consistent across retrains.
+- Use holdout evaluation before alias promotion to reduce optimistic bias.
+- Inspect class imbalance and threshold sensitivity for multilabel GO prediction.
+- Track dataset snapshot and term hash in MLflow for lineage auditing.
 
-## Integrated Embedding -> GO API
+## Service-Specific Docs
 
-To run both teammate services together (embedding + GO prediction + MLflow):
-
-```bash
-docker compose up --build
-```
-
-Ports:
-
-- `embedding-api`: `http://127.0.0.1:8000`
-- `go-prediction-api`: `http://127.0.0.1:8001`
-- `mlflow`: `http://127.0.0.1:5000`
-
-Integration flow:
-
-1. Submit embedding job (`POST /api/v1/jobs` or `/api/v1/jobs/fasta`) to `embedding-api`.
-2. Poll until status is `succeeded`.
-3. Trigger GO inference directly from embedding artifacts:
-
-```bash
-curl -sS -X POST "http://127.0.0.1:8000/api/v1/jobs/<JOB_ID>/predict-go" \
-  -H "Content-Type: application/json" \
-  -d '{"top_k": 10}'
-```
-
-Optional request fields:
-
-- `indices`: subset of embedding row indices to score (e.g. `[0, 3, 7]`)
-- `fail_fast`: default `true`; set `false` to continue on per-sequence failures and collect them in `failures`.
-
-One-shot endpoint (submit + wait + predict in one call):
-
-```bash
-curl -sS -X POST "http://127.0.0.1:8000/api/v1/predict-go-from-sequences" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "backend": "esm2",
-    "pooling": "mean",
-    "batch_size": 2,
-    "max_length": 1280,
-    "top_k": 10,
-    "sequences": [
-      {"id": "P1", "sequence": "MKTAYIAKQRQISFVKSHFSRQ"},
-      {"id": "P2", "sequence": "GAVLIPFYWSTCMNQDEKRH"}
-    ]
-  }'
-```
-
-### API Request Scenarios (examples)
-
-Assuming the integrated stack is running:
-
-```bash
-docker compose up --build
-```
-
-Service URLs:
-
-- Embedding API: `http://127.0.0.1:8000`
-- GO Prediction API: `http://127.0.0.1:8001`
-
-Quick health checks:
-
-```bash
-curl -sS http://127.0.0.1:8000/api/v1/health
-curl -sS http://127.0.0.1:8001/health
-```
-
-#### 1) Send amino acid sequences -> return embedding vectors
-
-Submit JSON sequences to `embedding-api`, poll job status, then download `.npy` artifacts.
-
-```bash
-# 1) Submit job
-RESP=$(curl -sS -X POST http://127.0.0.1:8000/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "stage": "test",
-    "backend": "esm2",
-    "pooling": "mean",
-    "batch_size": 2,
-    "max_length": 1280,
-    "sequences": [
-      {"id": "P1", "sequence": "MKTAYIAKQRQISFVKSHFSRQ"},
-      {"id": "P2", "sequence": "GAVLIPFYWSTCMNQDEKRH"}
-    ]
-  }')
-
-echo "$RESP"
-
-# 2) Extract job_id
-JOB_ID=$(python - <<'PY'
-import json,sys
-print(json.loads(sys.stdin.read())["job_id"])
-PY
-<<< "$RESP")
-
-echo "JOB_ID=$JOB_ID"
-
-# 3) Poll until succeeded
-curl -sS "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID"
-
-# 4) Download embeddings + ids
-curl -sS -o test_ids.npy \
-  "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID/artifacts/test_ids.npy"
-curl -sS -o test_embeddings.npy \
-  "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID/artifacts/test_embeddings.npy"
-```
-
-Optional shape check:
-
-```bash
-python - <<'PY'
-import numpy as np
-ids = np.load("test_ids.npy", allow_pickle=True)
-emb = np.load("test_embeddings.npy")
-print("ids:", ids.shape, ids.dtype)
-print("emb:", emb.shape, emb.dtype)
-PY
-```
-
-#### 2) Send FASTA file -> return embedding vectors
-
-Upload FASTA to `embedding-api`.
-
-```bash
-# Example FASTA file
-cat > sample.fasta <<'EOF'
->P1
-MKTAYIAKQRQISFVKSHFSRQ
->P2
-GAVLIPFYWSTCMNQDEKRH
-EOF
-
-# 1) Submit FASTA job
-RESP=$(curl -sS -X POST http://127.0.0.1:8000/api/v1/jobs/fasta \
-  -F "fasta_file=@sample.fasta" \
-  -F "backend=esm2" \
-  -F "pooling=mean" \
-  -F "batch_size=2" \
-  -F "max_length=1280")
-
-echo "$RESP"
-
-# 2) Extract job_id
-JOB_ID=$(python - <<'PY'
-import json,sys
-print(json.loads(sys.stdin.read())["job_id"])
-PY
-<<< "$RESP")
-
-# 3) Poll + download artifacts
-curl -sS "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID"
-curl -sS -o test_ids.npy \
-  "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID/artifacts/test_ids.npy"
-curl -sS -o test_embeddings.npy \
-  "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID/artifacts/test_embeddings.npy"
-```
-
-#### 3) Send embedding vector -> return GO predictions
-
-Call `go-prediction-api` directly with one embedding vector (length must be `1280`).
-
-```bash
-python - <<'PY'
-import json
-import numpy as np
-import requests
-
-# Replace with your real embedding. This example loads first row from file:
-emb = np.load("test_embeddings.npy")[0].astype(float).tolist()
-
-payload = {"embedding": emb, "top_k": 10}
-r = requests.post("http://127.0.0.1:8001/predict", json=payload, timeout=60)
-print("status:", r.status_code)
-print(json.dumps(r.json(), indent=2))
-PY
-```
-
-#### 4) Send sequence list -> return GO predictions
-
-Use one-shot endpoint on `embedding-api`: embed + wait + GO predict in one call.
-
-```bash
-curl -sS -X POST "http://127.0.0.1:8000/api/v1/predict-go-from-sequences" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "backend": "esm2",
-    "pooling": "mean",
-    "batch_size": 2,
-    "max_length": 1280,
-    "top_k": 10,
-    "sequences": [
-      {"id": "P1", "sequence": "MKTAYIAKQRQISFVKSHFSRQ"},
-      {"id": "P2", "sequence": "GAVLIPFYWSTCMNQDEKRH"}
-    ]
-  }'
-```
-
-Useful optional fields:
-
-- `indices`: predict only selected rows (e.g. `[0, 1]`)
-- `fail_fast`: default `true`; set `false` to continue and collect per-sequence failures
-- `timeout_seconds`, `poll_interval_seconds`: control waiting behavior
-
-#### 5) Send FASTA -> return GO predictions
-
-Current API supports this as a 2-step flow (FASTA job, then GO prediction from job artifacts).
-
-```bash
-# 1) Submit FASTA for embedding
-RESP=$(curl -sS -X POST http://127.0.0.1:8000/api/v1/jobs/fasta \
-  -F "fasta_file=@sample.fasta" \
-  -F "backend=esm2" \
-  -F "pooling=mean" \
-  -F "batch_size=2" \
-  -F "max_length=1280")
-
-JOB_ID=$(python - <<'PY'
-import json,sys
-print(json.loads(sys.stdin.read())["job_id"])
-PY
-<<< "$RESP")
-
-# 2) Poll until embedding job succeeds
-curl -sS "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID"
-
-# 3) Trigger GO prediction from embedding artifacts
-curl -sS -X POST "http://127.0.0.1:8000/api/v1/jobs/$JOB_ID/predict-go" \
-  -H "Content-Type: application/json" \
-  -d '{"top_k": 10}'
-```
-
-Notes:
-
-- `go-prediction-api` expects embedding dimension `1280` (ESM2-compatible path).
-- For large FASTA payloads, use moderate `batch_size` to reduce memory pressure.
-- If a request fails, inspect logs:
-  - `docker compose logs -f embedding-api`
-  - `docker compose logs -f go-prediction-api`
+- `services/embedding-api/README.md`
+- `services/training-api/README.md`
 
 ## License
 
