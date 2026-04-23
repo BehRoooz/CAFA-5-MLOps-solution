@@ -19,6 +19,13 @@ build/
 # Precomputed arrays
 *.npy
 
+# NGINX secrets (do not commit)
+nginx/.htpasswd
+nginx/.htpasswd-*
+nginx/certs/*.key
+nginx/certs/*.crt
+nginx/certs/*.pem
+
 # Environment
 .env
 .venv/
