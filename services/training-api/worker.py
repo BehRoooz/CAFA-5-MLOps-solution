@@ -10,8 +10,29 @@ from typing import Any
 
 from config import MLFLOW_EXTERNAL_UI_BASE, MLFLOW_TRACKING_URI, WORKER_POLL_INTERVAL_SEC
 from job_store import JobStore
+from prometheus_client import Counter, Gauge, Histogram
 
 APP_ROOT = Path(__file__).resolve().parents[2]
+TRAINING_JOBS_TOTAL = Counter(
+    "cafa5_training_jobs_total",
+    "Total training jobs partitioned by terminal status and mode.",
+    labelnames=("status", "mode"),
+)
+TRAINING_QUEUE_JOBS = Gauge(
+    "cafa5_training_queue_jobs",
+    "Training jobs currently in each lifecycle state.",
+    labelnames=("status",),
+)
+TRAINING_JOB_DURATION_SECONDS = Histogram(
+    "cafa5_training_job_duration_seconds",
+    "Training job duration in seconds by terminal status and mode.",
+    labelnames=("status", "mode"),
+)
+TRAINING_SUBPROCESS_FAILURES_TOTAL = Counter(
+    "cafa5_training_subprocess_failures_total",
+    "Training subprocess failures partitioned by failure reason.",
+    labelnames=("reason",),
+)
 
 
 def _build_mlflow_links(train_run_id: str | None, summary: dict[str, Any]) -> dict[str, Any] | None:
@@ -77,6 +98,11 @@ def _run_training_subprocess(request: dict[str, Any]) -> tuple[int, str, str]:
     return proc.returncode, proc.stdout, proc.stderr
 
 
+def _sync_queue_gauges(store: JobStore) -> None:
+    for status in ("queued", "running", "succeeded", "failed"):
+        TRAINING_QUEUE_JOBS.labels(status=status).set(store.count_jobs_by_status(status))
+
+
 def process_job(store: JobStore, job_id: str) -> None:
     job = store.get_job(job_id)
     if job is None:
@@ -134,16 +160,39 @@ def process_job(store: JobStore, job_id: str) -> None:
 
 
 def worker_loop(store: JobStore, stop_event: threading.Event) -> None:
+    _sync_queue_gauges(store)
     while not stop_event.is_set():
         job_id = store.get_next_queued_job_id()
         if job_id is None:
+            _sync_queue_gauges(store)
             time.sleep(WORKER_POLL_INTERVAL_SEC)
             continue
 
+        job = store.get_job(job_id)
+        mode = "train"
+        if job is not None:
+            mode = str(job["request"].get("mode", "train"))
+
         store.mark_running(job_id)
         store.update_progress(job_id, percent=None, message="running")
+        _sync_queue_gauges(store)
+        started = time.perf_counter()
         try:
             process_job(store, job_id)
+            job_after = store.get_job(job_id)
+            status = "failed"
+            if job_after is not None:
+                status = str(job_after.get("status", "failed"))
+                if status == "failed":
+                    reason = "unknown"
+                    err = job_after.get("error")
+                    if isinstance(err, dict):
+                        reason = str(err.get("code", "unknown")).lower()
+                    TRAINING_SUBPROCESS_FAILURES_TOTAL.labels(reason=reason).inc()
+            TRAINING_JOBS_TOTAL.labels(status=status, mode=mode).inc()
+            TRAINING_JOB_DURATION_SECONDS.labels(status=status, mode=mode).observe(
+                time.perf_counter() - started
+            )
         except Exception as exc:
             store.mark_failed(
                 job_id,
@@ -152,3 +201,10 @@ def worker_loop(store: JobStore, stop_event: threading.Event) -> None:
                     "message": str(exc),
                 },
             )
+            TRAINING_SUBPROCESS_FAILURES_TOTAL.labels(reason="training_runtime_failure").inc()
+            TRAINING_JOBS_TOTAL.labels(status="failed", mode=mode).inc()
+            TRAINING_JOB_DURATION_SECONDS.labels(status="failed", mode=mode).observe(
+                time.perf_counter() - started
+            )
+        finally:
+            _sync_queue_gauges(store)

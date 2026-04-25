@@ -1,0 +1,111 @@
+# Monitoring alerts for CAFA-5 MLOps solution
+groups:
+  # Recording rules for CAFA-5 MLOps solution
+  - name: cafa5_recording_rules
+    interval: 30s # interval for recording rules
+    rules:
+      - record: cafa5:http_request_error_ratio5m # record the error ratio for HTTP requests
+        expr: | # expression for recording rules
+          # sum the number of HTTP requests with status code 5xx by service
+          sum by (service) (
+            rate(cafa5_http_requests_total{status_code=~"5.."}[5m])
+          )
+          /
+          # clamp the minimum value to 0.001
+          clamp_min(sum by (service) (rate(cafa5_http_requests_total[5m])), 0.001)
+      - record: cafa5:http_request_p95_latency_seconds5m # record the p95 latency for HTTP requests
+        expr: | # expression for recording rules
+          # calculate the p95 latency for HTTP requests
+          histogram_quantile(0.95, sum by (service, le) (rate(cafa5_http_request_duration_seconds_bucket[5m])))
+      - record: cafa5:http_request_rate_rps5m # record the rate of HTTP requests per second
+        expr: | # expression for recording rules
+          # sum the number of HTTP requests by service
+          sum by (service) (rate(cafa5_http_requests_total[5m]))
+
+  - name: cafa5_alert_rules # alert rules for CAFA-5 MLOps solution
+    interval: 30s # interval for alert rules
+    rules:
+      - alert: Cafa5TargetDown # alert for down targets
+        expr: up{job=~"prometheus|embedding_api_.*|go_prediction_api_.*|trainer_api_.*|mlflow_health"} == 0
+        for: 2m # for more than 2 minutes
+        labels:
+          severity: critical # critical severity
+          team: platform # platform team
+        annotations:
+          summary: "Prometheus target down for {{ $labels.job }}" # summary of the alert
+          description: "Target {{ $labels.instance }} for job {{ $labels.job }} has been down for more than 2 minutes."
+          runbook_url: "README.md#monitoring-alerts-and-slo-runbook" # runbook URL
+
+      - alert: Cafa5HighHttp5xxRatio # alert for high HTTP 5xx ratio
+        expr: cafa5:http_request_error_ratio5m > 0.05 and cafa5:http_request_rate_rps5m > 0.1
+        for: 10m # for more than 10 minutes
+        labels:
+          severity: warning # warning severity
+          team: api # api team
+        annotations:
+          summary: "Elevated 5xx ratio in {{ $labels.service }}" # summary of the alert
+          description: "HTTP 5xx ratio has stayed above 5% for 10 minutes on {{ $labels.service }}."
+          runbook_url: "README.md#monitoring-alerts-and-slo-runbook"
+
+      - alert: Cafa5HighHttpP95Latency # alert for high HTTP p95 latency
+        expr: cafa5:http_request_p95_latency_seconds5m > 1.5 # p95 latency is above 1.5 seconds
+        for: 10m # for more than 10 minutes
+        labels:
+          severity: warning # warning severity
+          team: api # api team
+        annotations:
+          summary: "High p95 latency in {{ $labels.service }}" # summary of the alert
+          description: "p95 request latency is above 1.5s for 10 minutes on {{ $labels.service }}." # description of the alert
+          runbook_url: "README.md#monitoring-alerts-and-slo-runbook"
+
+      - alert: Cafa5EmbeddingJobFailureSpike # alert for embedding job failure spike
+        expr: increase(cafa5_embedding_jobs_total{status="failed"}[15m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: ml-platform
+        annotations:
+          summary: "Embedding job failures are spiking"
+          description: "More than 5 embedding jobs failed in the last 15 minutes."
+          runbook_url: "README.md#monitoring-alerts-and-slo-runbook"
+
+      - alert: Cafa5TrainingJobFailureSpike # alert for training job failure spike
+        expr: increase(cafa5_training_jobs_total{status="failed"}[15m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+          team: ml-platform # ml-platform team
+        annotations:
+          summary: "Training job failures are spiking"
+          description: "More than 3 training jobs failed in the last 15 minutes."
+          runbook_url: "README.md#monitoring-alerts-and-slo-runbook"
+
+      - alert: Cafa5EmbeddingQueueBacklogGrowing # alert for embedding queue backlog growing
+        expr: |
+          (
+            cafa5_embedding_queue_jobs{status="queued"} 
+            - min_over_time(cafa5_embedding_queue_jobs{status="queued"}[15m])
+          ) > 25 
+        for: 10m
+        labels:
+          severity: warning
+          team: ml-platform # ml-platform team
+        annotations:
+          summary: "Embedding queue backlog is growing"
+          description: "Embedding queued jobs increased by more than 25 over a 15 minute window."
+          runbook_url: "README.md#monitoring-alerts-and-slo-runbook"
+
+      - alert: Cafa5TrainingQueueBacklogGrowing # alert for training queue backlog growing
+        expr: |
+          (
+            cafa5_training_queue_jobs{status="queued"}
+            - min_over_time(cafa5_training_queue_jobs{status="queued"}[15m])
+          ) > 10
+        for: 10m
+        labels:
+          severity: warning
+          team: ml-platform # ml-platform team
+        annotations:
+          summary: "Training queue backlog is growing"
+          description: "Training queued jobs increased by more than 10 over a 15 minute window."
+          runbook_url: "README.md#monitoring-alerts-and-slo-runbook"

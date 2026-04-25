@@ -11,7 +11,8 @@ from urllib.error import HTTPError, URLError
 
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest, CollectorRegistry
 
 from config import API_PREFIX, ARTIFACT_ROOT, DB_PATH, GO_PREDICTION_API_URL
 from job_store import JobStore
@@ -23,13 +24,90 @@ from schemas import (
     PredictGoRequest,
     PredictGoResponse,
 )
-from worker import worker_loop
+from worker import parse_fasta_text, worker_loop
 
 app = FastAPI(title="Embedding API", version="0.1.0")
+
+# Prometheus metrics for the embedding API
+
+registry = CollectorRegistry() # to store metrics
+
+
+SERVICE_NAME = "embedding-api"
+
+HTTP_REQUESTS_TOTAL = Counter(
+    "cafa5_http_requests_total",
+    "Total number of HTTP requests.",
+    labelnames=("service", "route", "method", "status_code"),
+    registry=registry,
+)
+HTTP_REQUEST_DURATION_SECONDS = Histogram(
+    "cafa5_http_request_duration_seconds",
+    "HTTP request duration in seconds.",
+    labelnames=("service", "route", "method", "status_code"),
+    registry=registry,
+)
+HTTP_IN_FLIGHT_REQUESTS = Gauge(
+    "cafa5_http_in_flight_requests",
+    "Number of in-flight HTTP requests.",
+    labelnames=("service",),
+    registry=registry,
+)
+EMBEDDING_SEQUENCE_LENGTH = Histogram(
+    "cafa5_embedding_sequence_length",
+    "Observed amino-acid sequence lengths partitioned by embedding backend.",
+    labelnames=("backend",),
+    buckets=(16, 32, 64, 128, 256, 512, 1024, 1280, 2048, 4096, 8192, float("inf")),
+    registry=registry,
+)
+EMBEDDING_DIMENSION_MISMATCHES_TOTAL = Counter(
+    "cafa5_embedding_dimension_mismatch_total",
+    "Total number of embedding dimension mismatches detected before GO inference.",
+    registry=registry,
+)
 
 store = JobStore(DB_PATH)
 stop_event = threading.Event()
 worker_thread: threading.Thread | None = None
+
+
+def _observe_sequence_lengths(backend: str, sequences: list[str]) -> None:
+    for sequence in sequences:
+        EMBEDDING_SEQUENCE_LENGTH.labels(backend=backend).observe(len(sequence))
+
+
+def _route_label(path: str) -> str:
+    if path == "/metrics":
+        return "/metrics"
+    if path.startswith(API_PREFIX):
+        return path[len(API_PREFIX) :] or "/"
+    return path
+
+
+@app.middleware("http")
+async def prometheus_http_middleware(request, call_next):
+    route = _route_label(request.url.path)
+    method = request.method
+
+    HTTP_IN_FLIGHT_REQUESTS.labels(service=SERVICE_NAME).inc()
+    start = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        duration = time.perf_counter() - start
+        if route != "/metrics":
+            labels = {
+                "service": SERVICE_NAME,
+                "route": route,
+                "method": method,
+                "status_code": str(status_code),
+            }
+            HTTP_REQUESTS_TOTAL.labels(**labels).inc()
+            HTTP_REQUEST_DURATION_SECONDS.labels(**labels).observe(duration)
+        HTTP_IN_FLIGHT_REQUESTS.labels(service=SERVICE_NAME).dec()
 
 
 @app.on_event("startup")
@@ -52,8 +130,17 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/metrics", include_in_schema=False)
+def metrics() -> Response:
+    return Response(content=generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
+
+
 @app.post(API_PREFIX + "/jobs", response_model=CreateJobResponse, status_code=202)
 def create_job(request: CreateJobRequest) -> CreateJobResponse:
+    _observe_sequence_lengths(
+        backend=request.backend,
+        sequences=[seq.sequence for seq in request.sequences],
+    )
     job_id = str(uuid.uuid4())
     store.create_job(job_id, request.model_dump())
     return CreateJobResponse(
@@ -74,6 +161,11 @@ async def create_fasta_job(
     fasta_text = (await fasta_file.read()).decode("utf-8", errors="replace")
     if not fasta_text.strip():
         raise HTTPException(status_code=400, detail="Uploaded FASTA is empty.")
+    try:
+        _, sequences = parse_fasta_text(fasta_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _observe_sequence_lengths(backend=backend, sequences=sequences)
 
     job_id = str(uuid.uuid4())
     payload = {
@@ -176,6 +268,7 @@ def _predict_go_for_job(job_id: str, request: PredictGoRequest) -> PredictGoResp
     if len(ids) != embeddings.shape[0]:
         raise HTTPException(status_code=500, detail="IDS_EMBEDDINGS_LENGTH_MISMATCH")
     if embeddings.shape[1] != 1280:
+        EMBEDDING_DIMENSION_MISMATCHES_TOTAL.inc()
         raise HTTPException(
             status_code=400,
             detail=(
@@ -247,6 +340,10 @@ def _wait_for_job_completion(job_id: str, timeout_seconds: int, poll_interval_se
 
 @app.post(API_PREFIX + "/predict-go-from-sequences", response_model=PredictGoResponse)
 def predict_go_from_sequences(request: PredictGoFromSequencesRequest) -> PredictGoResponse:
+    _observe_sequence_lengths(
+        backend=request.backend,
+        sequences=[seq.sequence for seq in request.sequences],
+    )
     job_id = str(uuid.uuid4())
     job_payload = {
         "stage": "test",
