@@ -14,9 +14,12 @@ from mlflow.tracking import MlflowClient
 def _resolve_version_from_train_run(
     client: MlflowClient, model_name: str, train_run_id: str
 ) -> Optional[str]:
-    target_source = f"runs:/{train_run_id}/model"
     for mv in client.search_model_versions(f"name='{model_name}'"):
-        if mv.source == target_source:
+        # Primary match key: model version run_id (stable across source URI formats).
+        if str(getattr(mv, "run_id", "")) == train_run_id:
+            return str(mv.version)
+        # Backward-compatibility for older registrations resolved by source URI.
+        if str(getattr(mv, "source", "")) == f"runs:/{train_run_id}/model":
             return str(mv.version)
     return None
 

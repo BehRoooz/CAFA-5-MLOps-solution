@@ -115,12 +115,22 @@ def process_job(store: JobStore, job_id: str) -> None:
     summary_path = APP_ROOT / "outputs" / "train_run_summary.json"
     if code != 0:
         err_text = (stderr or "").strip() or (stdout or "").strip() or f"exit code {code}"
+        # Keep both head and tail so long training logs do not hide terminal traceback.
+        err_excerpt = err_text if len(err_text) <= 8000 else (
+            err_text[:3500] + "\n\n...[truncated middle]...\n\n" + err_text[-3500:]
+        )
+        signal_hint = None
+        if code < 0:
+            signal_hint = f"terminated_by_signal_{abs(code)}"
         store.mark_failed(
             job_id,
             {
                 "code": "TRAINING_SUBPROCESS_FAILED",
-                "message": err_text[:8000],
+                "message": err_excerpt,
                 "exit_code": code,
+                "signal_hint": signal_hint,
+                "stderr_len": len(stderr or ""),
+                "stdout_len": len(stdout or ""),
             },
         )
         return
