@@ -12,26 +12,6 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"] # targets for Prometheus
 
-  - job_name: embedding_api_health # job name for embedding API health
-    metrics_path: /api/v1/health # metrics path for embedding API health
-    static_configs:
-      - targets: ["embedding-api:8000"] # targets for embedding API
-
-  - job_name: go_prediction_api_health
-    metrics_path: /health # metrics path for GO prediction API health
-    static_configs:
-      - targets: ["go-prediction-api:8000"] # targets for GO prediction API
-
-  - job_name: trainer_api_health # job name for trainer API health
-    metrics_path: /api/train/health # metrics path for trainer API health
-    static_configs:
-      - targets: ["trainer-api:8000"] # targets for trainer API
-
-  - job_name: mlflow_health
-    metrics_path: /health # metrics path for MLflow health
-    static_configs:
-      - targets: ["mlflow:5000"] # targets for MLflow
-
   - job_name: embedding_api_metrics # job name for embedding API metrics
     metrics_path: /metrics # metrics path for embedding API metrics
     static_configs:
