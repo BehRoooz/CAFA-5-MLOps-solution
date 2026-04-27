@@ -206,15 +206,15 @@ Gateway also applies:
   - `docker compose logs -f nginx embedding-api go-prediction-api mlflow`
   - add `trainer-api` when using training profile.
 
-## Monitoring Alerts And SLO Runbook
+## Monitoring (Prometheus + Grafana)
 
 Start observability stack:
 
 ```bash
-docker compose --profile monitoring up --build -d prometheus
+make monitoring-up
 ```
 
-Validate Prometheus config and rules:
+Quick verification:
 
 ```bash
 curl -s http://127.0.0.1:9090/-/ready
@@ -222,26 +222,15 @@ curl -s http://127.0.0.1:9090/api/v1/rules
 curl -s http://127.0.0.1:9090/api/v1/alerts
 ```
 
-Baseline operational alerts in `monitoring/alerts.yml`:
+Current minimal production-safe alerts in `monitoring/alerts.yml`:
 
-- `Cafa5TargetDown`: any core scrape target unavailable for >2m.
-- `Cafa5HighHttp5xxRatio`: sustained API 5xx ratio >5% with non-trivial traffic.
-- `Cafa5HighHttpP95Latency`: p95 API latency above threshold.
-- `Cafa5EmbeddingJobFailureSpike` / `Cafa5TrainingJobFailureSpike`: abrupt failed-job increase.
-- `Cafa5EmbeddingQueueBacklogGrowing` / `Cafa5TrainingQueueBacklogGrowing`: queue growth trend.
+- `Cafa5ServiceMetricsTargetDown`
+- `Cafa5HighHttp5xxRatio`
+- `Cafa5EmbeddingQueueBacklogHigh`
 
-Pre-aggregated recording rules:
+For full runbook details (provisioning, dashboard versioning/export workflow, alert validation, troubleshooting, and PromQL checks), see:
 
-- `cafa5:http_request_error_ratio5m`
-- `cafa5:http_request_p95_latency_seconds5m`
-- `cafa5:http_request_rate_rps5m`
-
-Recommended first-response playbook:
-
-1. Confirm target reachability and restarts: `docker compose ps` and `docker compose logs`.
-2. Correlate API-level saturation (`5xx`, p95 latency) against queue growth and worker failures.
-3. For bioinformatics pipeline drift symptoms, inspect sequence length distribution and embedding backend consistency (`esm2` vs configured training source).
-4. Check model-serving integrity (registry alias, model version, embedding dimensionality assumptions) before restarting inference services.
+- `monitoring/README.md`
 
 ## Practical API Examples
 
