@@ -70,6 +70,20 @@ services:
     volumes:
       - ./outputs:/app/outputs
 
+  streamlit-ui:
+    build:
+      context: .
+      dockerfile: docker/docker_streamlit/Dockerfile.streamlit
+    image: cafa5-streamlit-ui:local
+    working_dir: /app/services/streamlit-ui
+    networks: [cafa5]
+    environment:
+      GATEWAY_BASE_URL: https://nginx
+    depends_on:
+      - embedding-api
+      - go-prediction-api 
+      - mlflow
+
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.13.0
     networks: [cafa5]
@@ -96,6 +110,7 @@ services:
       - embedding-api
       - go-prediction-api
       - mlflow
+      - streamlit-ui
 
   prometheus:
     image: prom/prometheus:latest
