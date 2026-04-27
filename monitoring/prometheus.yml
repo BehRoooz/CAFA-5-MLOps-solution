@@ -1,0 +1,28 @@
+# Prometheus configuration for CAFA-5 MLOps solution
+global:
+  scrape_interval: 30s # scrape interval for Prometheus
+  evaluation_interval: 30s # evaluation interval for Prometheus
+  scrape_timeout: 5s # scrape timeout for Prometheus
+
+rule_files:
+  - /etc/prometheus/alerts.yml # alerts file for Prometheus configuration in container
+
+scrape_configs:
+  - job_name: prometheus # job name for Prometheus
+    static_configs:
+      - targets: ["localhost:9090"] # targets for Prometheus
+
+  - job_name: embedding_api_metrics # job name for embedding API metrics
+    metrics_path: /metrics # metrics path for embedding API metrics
+    static_configs:
+      - targets: ["embedding-api:8000"] # targets for embedding API
+
+  - job_name: go_prediction_api_metrics
+    metrics_path: /metrics # metrics path for GO prediction API metrics
+    static_configs:
+      - targets: ["go-prediction-api:8000"] # targets for GO prediction API
+
+  - job_name: trainer_api_metrics # job name for trainer API metrics
+    metrics_path: /metrics # metrics path for trainer API metrics
+    static_configs:
+      - targets: ["trainer-api:8000"] # targets for trainer API

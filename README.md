@@ -206,6 +206,32 @@ Gateway also applies:
   - `docker compose logs -f nginx embedding-api go-prediction-api mlflow`
   - add `trainer-api` when using training profile.
 
+## Monitoring (Prometheus + Grafana)
+
+Start observability stack:
+
+```bash
+make monitoring-up
+```
+
+Quick verification:
+
+```bash
+curl -s http://127.0.0.1:9090/-/ready
+curl -s http://127.0.0.1:9090/api/v1/rules
+curl -s http://127.0.0.1:9090/api/v1/alerts
+```
+
+Current minimal production-safe alerts in `monitoring/alerts.yml`:
+
+- `Cafa5ServiceMetricsTargetDown`
+- `Cafa5HighHttp5xxRatio`
+- `Cafa5EmbeddingQueueBacklogHigh`
+
+For full runbook details (provisioning, dashboard versioning/export workflow, alert validation, troubleshooting, and PromQL checks), see:
+
+- `monitoring/README.md`
+
 ## Practical API Examples
 
 Use your basic-auth credentials depending on route (`.htpasswd-admin` or `.htpasswd-user`).

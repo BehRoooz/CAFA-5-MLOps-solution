@@ -66,6 +66,14 @@ class JobStore:
             ).fetchone()
         return row["job_id"] if row else None
 
+    def count_jobs_by_status(self, status: str) -> int:
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT COUNT(1) AS n FROM jobs WHERE status = ?",
+                (status,),
+            ).fetchone()
+        return int(row["n"]) if row else 0
+
     def mark_running(self, job_id: str) -> None:
         with self.lock:
             self.conn.execute(

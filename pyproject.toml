@@ -21,6 +21,7 @@ dependencies = [
     "transformers",
     "safetensors",
     "mlflow==2.13.0",
+    "prometheus-client>=0.22.1",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,37 @@
+groups:
+  - name: cafa5_simple_alerts
+    interval: 30s
+    rules:
+      - alert: Cafa5ServiceMetricsTargetDown
+        expr: up{job=~"prometheus|embedding_api_metrics|go_prediction_api_metrics|trainer_api_metrics"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service scrape target down: {{ $labels.job }}"
+          description: "{{ $labels.instance }} is down for >2m"
+
+      - alert: Cafa5HighHttp5xxRatio
+        expr: |
+          (
+            sum by (service) (rate(cafa5_http_requests_total{status_code=~"5.."}[5m]))
+            /
+            clamp_min(sum by (service) (rate(cafa5_http_requests_total[5m])), 0.001)
+          ) > 0.05
+          and
+          sum by (service) (rate(cafa5_http_requests_total[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High 5xx ratio on {{ $labels.service }}"
+          description: "5xx ratio >5% for 10m with enough traffic"
+
+      - alert: Cafa5EmbeddingQueueBacklogHigh
+        expr: cafa5_embedding_queue_jobs{status="queued"} > 20
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Embedding queue backlog high"
+          description: "Queued embedding jobs >20 for 10m"

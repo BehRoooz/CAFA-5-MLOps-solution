@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest, CollectorRegistry
 
 from config import API_PREFIX, ARTIFACT_ROOT, DB_PATH
 from job_store import JobStore
@@ -12,9 +15,68 @@ from worker import worker_loop
 
 app = FastAPI(title="Training API", version="0.1.0")
 
+
+# Prometheus metrics for the training API
+registry = CollectorRegistry() # to store metrics
+
+SERVICE_NAME = "trainer-api"
+
+HTTP_REQUESTS_TOTAL = Counter(
+    "cafa5_http_requests_total",
+    "Total number of HTTP requests.",
+    labelnames=("service", "route", "method", "status_code"),
+    registry=registry,
+)
+HTTP_REQUEST_DURATION_SECONDS = Histogram(
+    "cafa5_http_request_duration_seconds",
+    "HTTP request duration in seconds.",
+    labelnames=("service", "route", "method", "status_code"),
+    registry=registry,
+)
+HTTP_IN_FLIGHT_REQUESTS = Gauge(
+    "cafa5_http_in_flight_requests",
+    "Number of in-flight HTTP requests.",
+    labelnames=("service",),
+    registry=registry,
+)
+
 store = JobStore(DB_PATH)
 stop_event = threading.Event()
 worker_thread: threading.Thread | None = None
+
+
+def _route_label(path: str) -> str:
+    if path == "/metrics":
+        return "/metrics"
+    if path.startswith(API_PREFIX):
+        return path[len(API_PREFIX) :] or "/"
+    return path
+
+
+@app.middleware("http")
+async def prometheus_http_middleware(request, call_next):
+    route = _route_label(request.url.path)
+    method = request.method
+
+    HTTP_IN_FLIGHT_REQUESTS.labels(service=SERVICE_NAME).inc()
+    start = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        duration = time.perf_counter() - start
+        if route != "/metrics":
+            labels = {
+                "service": SERVICE_NAME,
+                "route": route,
+                "method": method,
+                "status_code": str(status_code),
+            }
+            HTTP_REQUESTS_TOTAL.labels(**labels).inc()
+            HTTP_REQUEST_DURATION_SECONDS.labels(**labels).observe(duration)
+        HTTP_IN_FLIGHT_REQUESTS.labels(service=SERVICE_NAME).dec()
 
 
 @app.on_event("startup")
@@ -35,6 +97,11 @@ def shutdown_event() -> None:
 @app.get(API_PREFIX + "/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics() -> Response:
+    return Response(content=generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.post(API_PREFIX + "/train", response_model=CreateTrainJobResponse, status_code=202)
