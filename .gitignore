@@ -51,3 +51,6 @@ nginx/.htpasswd-*
 nginx/certs/*.key
 nginx/certs/*.crt
 nginx/certs/*.pem
+
+# MLflow
+mlruns/
