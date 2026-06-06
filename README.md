@@ -111,11 +111,11 @@ make training-up
 
 ## Access Points
 
-- Gateway root: `https://127.0.0.1`
-- Streamlit UI: `https://127.0.0.1/ui/`
-- MLflow via gateway: `https://127.0.0.1/mlflow/`
-- Prometheus: `http://127.0.0.1:9090`
-- Grafana: `http://127.0.0.1:3000`
+- Gateway root: `https://localhost`
+- Streamlit UI: `https://localhost/ui/`
+- MLflow via gateway: `https://localhost/mlflow/`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000`
 
 ## NGINX Architecture
 
@@ -182,9 +182,9 @@ Defined in `monitoring/alerts.yml`:
 Verify:
 
 ```bash
-curl -s http://127.0.0.1:9090/-/ready
-curl -s http://127.0.0.1:9090/api/v1/rules
-curl -s http://127.0.0.1:9090/api/v1/alerts
+curl -s http://localhost:9090/-/ready
+curl -s http://localhost:9090/api/v1/rules
+curl -s http://localhost:9090/api/v1/alerts
 ```
 
 ## APIs and Route Map
@@ -212,15 +212,15 @@ All gateway examples below use TLS and basic auth.
 ### 1) Health checks
 
 ```bash
-curl -sk -u USER:PASS https://127.0.0.1/api/v1/health
-curl -sk -u USER:PASS https://127.0.0.1/api/predict/health
-curl -sk -u USER:PASS https://127.0.0.1/api/train/health
+curl -sk -u USER:PASS https://localhost/api/v1/health
+curl -sk -u USER:PASS https://localhost/api/predict/health
+curl -sk -u USER:PASS https://localhost/api/train/health
 ```
 
 ### 2) Async embeddings from sequences
 
 ```bash
-curl -sk -u ADMIN:ADMIN_PASS -X POST https://127.0.0.1/api/v1/jobs \
+curl -sk -u ADMIN:ADMIN_PASS -X POST https://localhost/api/v1/jobs \
   -H "Content-Type: application/json" \
   -d '{
     "stage": "test",
@@ -238,11 +238,11 @@ curl -sk -u ADMIN:ADMIN_PASS -X POST https://127.0.0.1/api/v1/jobs \
 Poll job and download artifacts:
 
 ```bash
-curl -sk -u ADMIN:ADMIN_PASS https://127.0.0.1/api/v1/jobs/<JOB_ID>
+curl -sk -u ADMIN:ADMIN_PASS https://localhost/api/v1/jobs/<JOB_ID>
 curl -sk -u ADMIN:ADMIN_PASS -o test_ids.npy \
-  https://127.0.0.1/api/v1/jobs/<JOB_ID>/artifacts/test_ids.npy
+  https://localhost/api/v1/jobs/<JOB_ID>/artifacts/test_ids.npy
 curl -sk -u ADMIN:ADMIN_PASS -o test_embeddings.npy \
-  https://127.0.0.1/api/v1/jobs/<JOB_ID>/artifacts/test_embeddings.npy
+  https://localhost/api/v1/jobs/<JOB_ID>/artifacts/test_embeddings.npy
 ```
 
 ### 3) Direct embedding -> GO inference
@@ -255,7 +255,7 @@ import requests
 
 embedding = np.load("test_embeddings.npy")[0].astype(float).tolist()
 r = requests.post(
-    "https://127.0.0.1/api/predict/predict",
+    "https://localhost/api/predict/predict",
     auth=("USER", "USER_PASS"),
     json={"embedding": embedding, "top_k": 10},
     verify=False,
@@ -288,7 +288,7 @@ Example:
 
 ```bash
 curl -sk -u USER:USER_PASS -X POST \
-  https://127.0.0.1/api/v1/predict-go-from-sequences \
+  https://localhost/api/v1/predict-go-from-sequences \
   -H "Content-Type: application/json" \
   -d '{
     "backend": "esm2",
@@ -334,7 +334,7 @@ Response shape (simplified):
 ### 5) Trigger retraining via API
 
 ```bash
-curl -sk -u ADMIN:ADMIN_PASS -X POST https://127.0.0.1/api/train/train \
+curl -sk -u ADMIN:ADMIN_PASS -X POST https://localhost/api/train/train \
   -H "Content-Type: application/json" \
   -d '{"config":"configs/config.yaml","mode":"retrain"}'
 ```
@@ -342,7 +342,7 @@ curl -sk -u ADMIN:ADMIN_PASS -X POST https://127.0.0.1/api/train/train \
 Poll:
 
 ```bash
-curl -sk -u ADMIN:ADMIN_PASS https://127.0.0.1/api/train/jobs/<JOB_ID>
+curl -sk -u ADMIN:ADMIN_PASS https://localhost/api/train/jobs/<JOB_ID>
 ```
 
 ## Retraining Workflow Options
