@@ -33,7 +33,7 @@ RUN pip install --upgrade pip setuptools wheel && \
 ############################
 # NVIDIA builder
 ############################
-FROM python:3.11-slim AS builder-nvidia
+FROM python:3.12-slim AS builder-nvidia
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
