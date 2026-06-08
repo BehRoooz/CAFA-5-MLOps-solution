@@ -12,6 +12,7 @@ from mlflow_logger import log_inference
 from model_loader import load_model, load_model_from_registry, load_term_names
 from predictor_service import predict_top_k
 from schemas import HealthResponse, PredictRequest, PredictResponse
+from src.utils import get_device_info, get_device_name
 
 # root path for the app
 APP_ROOT = Path(__file__).resolve().parents[2]
@@ -78,6 +79,7 @@ INFERENCE_TOP_K_REQUESTS_TOTAL = Counter(
 MODEL = None
 TERM_NAMES = None
 MODEL_META = None
+INFERENCE_DEVICE = get_device_name()
 
 
 def _validation_reason(message: str) -> str:
@@ -123,11 +125,11 @@ def startup_event() -> None:
         if MODEL_URI:
             MODEL, TERM_NAMES, MODEL_META = load_model_from_registry(
                 MODEL_URI,
-                device="cpu",
+                device=INFERENCE_DEVICE,
                 cache_dir=MODEL_CACHE_DIR,
             )
         else:
-            MODEL, MODEL_META = load_model(CHECKPOINT_PATH, META_PATH, device="cpu")
+            MODEL, MODEL_META = load_model(CHECKPOINT_PATH, META_PATH, device=INFERENCE_DEVICE)
             TERM_NAMES = load_term_names(TERM_NAMES_PATH)
     except Exception:
         MODEL = None
@@ -137,10 +139,17 @@ def startup_event() -> None:
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
+    device_info = get_device_info()
     return HealthResponse(
         status="ok",
         model_loaded=MODEL is not None and TERM_NAMES is not None and MODEL_META is not None,
         model_version=MODEL_META.get("model_version") if MODEL_META else None,
+        device=str(device_info.get("device")),
+        cuda_available=bool(device_info.get("cuda_available")),
+        cafa_device=str(device_info.get("cafa_device")),
+        cuda_device_name=(
+            str(device_info["cuda_device_name"]) if "cuda_device_name" in device_info else None
+        ),
     )
 
 
@@ -166,7 +175,7 @@ def predict(request: PredictRequest, raw_request: Request) -> PredictResponse:
             term_names=TERM_NAMES,
             top_k=request.top_k,
             apply_sigmoid=True,
-            device="cpu",
+            device=INFERENCE_DEVICE,
             expected_dim=int(MODEL_META.get("embedding_dim", 1280)),
         )
         status_code = "200"
