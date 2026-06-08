@@ -1,4 +1,4 @@
-# Embedding API (CPU-first, async jobs)
+# Embedding API (GPU-first via CAFA_DEVICE, async jobs)
 
 Minimal FastAPI service to generate protein language model embeddings and persist them as `.npy` artifacts.
 
@@ -33,7 +33,7 @@ chmod +x scripts/smoke_embedding_api.sh && ./scripts/smoke_embedding_api.sh
 
 See also [../../README.md](../../README.md) → **How to run with Docker** for volumes, output shapes, and manual `curl` examples.
 
-## Run the service (local CPU)
+## Run the service (local)
 
 From repo root (`CAFA-5-MLOps-solution/`):
 
@@ -45,7 +45,10 @@ Health check:
 
 ```bash
 curl http://127.0.0.1:8000/api/v1/health
+# Example: {"status":"ok","device":"cuda","cuda_available":true,"cafa_device":"auto",...}
 ```
+
+Set `CAFA_DEVICE=auto` (default), `cuda`, or `cpu` to control the embedding device.
 
 ## Endpoints
 
@@ -143,7 +146,7 @@ curl -o test_embeddings.npy \
 ## Model behavior (important)
 
 - Backend options supported by the code: `esm2`, `protbert`, `t5`
-- The current embedding runner uses CPU (`torch.device("cpu")`).
+- Device is resolved via `CAFA_DEVICE` (`auto` uses CUDA when available, else CPU). FP16 autocast is enabled on CUDA.
 - Embeddings are saved as `float32`.
 - Output shape is `(N, D)`, where `D` depends on backend:
   - `esm2`: `D=1280`
