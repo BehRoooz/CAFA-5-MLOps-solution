@@ -16,7 +16,7 @@ PROJECT_DESCRIPTION = (
     "Interactive sequence-to-GO inference UI backed by the embedding and GO "
     "prediction APIs through the NGINX gateway."
 )
-DEFAULT_GATEWAY_URL = os.getenv("GATEWAY_BASE_URL", "https://127.0.0.1")
+DEFAULT_GATEWAY_URL = os.getenv("GATEWAY_BASE_URL", "https://localhost")
 PREDICT_ENDPOINT = "/api/v1/predict-go-from-sequences"
 MAX_TOP_K = 500
 AA_PATTERN = re.compile(r"^[ACDEFGHIKLMNPQRSTVWY]+$")
@@ -147,11 +147,11 @@ def main() -> None:
     st.subheader("Platform Links")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown("- [MLflow](https://127.0.0.1/mlflow/)")
+        st.markdown("- [MLflow](https://localhost/mlflow/)")
     with c2:
-        st.markdown("- [Prometheus](http://127.0.0.1:9090)")
+        st.markdown("- [Prometheus](http://localhost:9090)")
     with c3:
-        st.markdown("- [Grafana](http://127.0.0.1:3000)")
+        st.markdown("- [Grafana](http://localhost:3000)")
 
     st.subheader("Workflow")
     st.graphviz_chart(WORKFLOW_DOT, use_container_width=True)
