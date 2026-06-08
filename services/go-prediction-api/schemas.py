@@ -25,3 +25,7 @@ class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
     model_version: str | None = None
+    device: str | None = None
+    cuda_available: bool | None = None
+    cafa_device: str | None = None
+    cuda_device_name: str | None = None

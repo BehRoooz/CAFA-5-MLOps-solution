@@ -11,6 +11,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, ge
 from config import API_PREFIX, ARTIFACT_ROOT, DB_PATH
 from job_store import JobStore
 from schemas import CreateTrainJobResponse, JobStatusResponse, MlflowLinks, TrainJobRequest, TrainingProgress
+from src.utils import get_device_info
 from worker import worker_loop
 
 app = FastAPI(title="Training API", version="0.1.0")
@@ -95,8 +96,8 @@ def shutdown_event() -> None:
 
 
 @app.get(API_PREFIX + "/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, str | bool]:
+    return {"status": "ok", **get_device_info()}
 
 
 @app.get("/metrics", include_in_schema=False)

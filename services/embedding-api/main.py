@@ -24,6 +24,7 @@ from schemas import (
     PredictGoRequest,
     PredictGoResponse,
 )
+from src.utils import get_device_info
 from worker import parse_fasta_text, worker_loop
 
 app = FastAPI(title="Embedding API", version="0.1.0")
@@ -127,8 +128,8 @@ def shutdown_event() -> None:
 
 # health endpoint to check the status of the API
 @app.get(API_PREFIX + "/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, str | bool]:
+    return {"status": "ok", **get_device_info()}
 
 # metrics endpoint to get the metrics for the API
 @app.get("/metrics", include_in_schema=False)

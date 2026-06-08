@@ -18,9 +18,12 @@ services:
     working_dir: /app
     profiles: ["training"]
     networks: [cafa5]
+    gpus: all
     environment:
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /app
+      CAFA_DEVICE: auto
+      NVIDIA_VISIBLE_DEVICES: all
       MLFLOW_TRACKING_URI: http://mlflow:5000
       # Browser URL for MLflow links from GET /api/train/jobs/{id} (via gateway, HTTPS)
       MLFLOW_EXTERNAL_UI_BASE: https://127.0.0.1/mlflow
@@ -40,9 +43,12 @@ services:
     image: cafa5-embedding-api:local
     working_dir: /app/services/embedding-api
     networks: [cafa5]
+    gpus: all
     environment:
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /app:/app/services/embedding-api
+      CAFA_DEVICE: auto
+      NVIDIA_VISIBLE_DEVICES: all
       GO_PREDICTION_API_URL: http://go-prediction-api:8000
       MLFLOW_TRACKING_URI: http://mlflow:5000
     depends_on:
@@ -59,9 +65,12 @@ services:
     image: cafa5-go-prediction-api:local
     working_dir: /app/services/go-prediction-api
     networks: [cafa5]
+    gpus: all
     environment:
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /app:/app/services/go-prediction-api
+      CAFA_DEVICE: auto
+      NVIDIA_VISIBLE_DEVICES: all
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MODEL_URI: models:/cafa-go-model@champion
       MODEL_CACHE_DIR: /app/model_cache

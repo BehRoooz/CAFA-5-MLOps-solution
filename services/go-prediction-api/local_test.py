@@ -4,6 +4,7 @@ import numpy as np
 
 from model_loader import load_model, load_term_names
 from predictor_service import predict_top_k
+from src.utils import get_device_name
 
 CHECKPOINT_PATH = "outputs/checkpoints/best_model.pt"
 TERM_NAMES_PATH = "outputs/label_matrix_top500/term_names.npy"
@@ -11,7 +12,8 @@ META_PATH = "models/model_meta.json"
 
 
 def main() -> None:
-    model, meta = load_model(CHECKPOINT_PATH, META_PATH, device="cpu")
+    device = get_device_name()
+    model, meta = load_model(CHECKPOINT_PATH, META_PATH, device=device)
     term_names = load_term_names(TERM_NAMES_PATH)
 
     embedding_dim = int(meta["embedding_dim"])
@@ -25,9 +27,10 @@ def main() -> None:
         term_names=term_names,
         top_k=top_k_default,
         apply_sigmoid=True,
-        device="cpu",
+        device=device,
     )
 
+    print("device:", device)
     print("model_version:", meta.get("model_version", "unknown"))
     print("top_k:", result["top_k"])
     print("predictions:")
