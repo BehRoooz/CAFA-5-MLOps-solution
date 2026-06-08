@@ -23,10 +23,35 @@ def set_seed(seed: int = 42) -> None:
 
 
 def get_device() -> torch.device:
-    """Return the best available torch device (CUDA > CPU)."""
+    """Return torch device per ``CAFA_DEVICE`` (auto | cuda | cpu). Default: auto (CUDA if available)."""
+    preference = os.environ.get("CAFA_DEVICE", "auto").strip().lower()
+    if preference == "cpu":
+        return torch.device("cpu")
+    if preference == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("CAFA_DEVICE=cuda but torch.cuda.is_available() is False")
+        return torch.device("cuda")
     if torch.cuda.is_available():
         return torch.device("cuda")
     return torch.device("cpu")
+
+
+def get_device_name() -> str:
+    """String name of the resolved torch device (e.g. ``cuda`` or ``cpu``)."""
+    return str(get_device())
+
+
+def get_device_info() -> dict[str, str | bool]:
+    """Device metadata for service health endpoints."""
+    device = get_device()
+    info: dict[str, str | bool] = {
+        "device": str(device),
+        "cuda_available": torch.cuda.is_available(),
+        "cafa_device": os.environ.get("CAFA_DEVICE", "auto"),
+    }
+    if torch.cuda.is_available():
+        info["cuda_device_name"] = torch.cuda.get_device_name(0)
+    return info
 
 
 def setup_logger(
