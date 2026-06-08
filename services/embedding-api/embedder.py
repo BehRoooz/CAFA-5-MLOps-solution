@@ -12,6 +12,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.embed_sequences import HF_MODEL_REGISTRY, embed_sequences, normalize_sequence
+from src.utils import get_device
 
 
 _MODEL_CACHE: dict[str, tuple[object, object]] = {}
@@ -47,7 +48,7 @@ def embed_sequence_batch(
     if len(ids) != len(sequences):
         raise ValueError("ids and sequences length mismatch")
 
-    device = torch.device("cpu")
+    device = get_device()
     tokenizer, model = get_model_and_tokenizer(backend)
     model.to(device)
     tokenizer_mode = HF_MODEL_REGISTRY[backend]["tokenizer_mode"]
@@ -63,7 +64,7 @@ def embed_sequence_batch(
             batch,
             device,
             max_length=max_length,
-            fp16=False,
+            fp16=(device.type == "cuda"),
             pooling=pooling,
             tokenizer_mode=tokenizer_mode,
         )
